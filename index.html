@@ -511,6 +511,189 @@
                 align-items: stretch;
             }
         }
+@media (max-width: 480px) {
+    /* Nasconde alcune informazioni non essenziali su schermi molto piccoli */
+    .calendar-day-info p:last-child {
+        display: none; /* Nasconde il contatore dei conduttori */
+    }
+    
+    .badge {
+        font-size: 10px;
+        padding: 3px 6px;
+    }
+    
+    .day-indicator {
+        font-size: 10px;
+        padding: 3px 8px;
+    }
+    
+    /* Semplifica le card dei giorni */
+    .calendar-day-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+}
+/* Miglioramenti per dispositivi mobili */
+@media (max-width: 768px) {
+    /* Riduci padding e margini */
+    .container {
+        padding: 10px;
+    }
+    
+    h1 {
+        font-size: 1.8em;
+        margin-bottom: 20px;
+    }
+    
+    /* Tab più compatti */
+    .tabs {
+        flex-wrap: wrap;
+    }
+    
+    .tab-btn {
+        padding: 10px 15px;
+        font-size: 0.9em;
+        flex: 1 1 auto;
+        min-width: 120px;
+    }
+    
+    /* Griglie a colonna singola */
+    .config-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    /* Calendario a colonna singola */
+    .calendar {
+        grid-template-columns: 1fr;
+    }
+    
+    /* Header dei giorni più compatti */
+    .day-config-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    
+    .day-config-header select,
+    .day-config-header input[type="time"],
+    .day-config-header input[type="text"] {
+        width: 100%;
+        min-width: auto;
+    }
+    
+    /* Pulsanti più grandi per il touch */
+    .btn, 
+    .btn-sm,
+    .add-conductor-btn,
+    .remove-conductor-btn {
+        padding: 12px 15px;
+        font-size: 16px; /* Evita lo zoom automatico su iOS */
+        min-height: 44px; /* Dimensione minima touch-friendly */
+    }
+    
+    /* Checkbox più grandi per il touch */
+    .person-item input[type="checkbox"],
+    .day-config-header input[type="checkbox"] {
+        width: 30px;
+        height: 30px;
+        transform: scale(1.2);
+        margin-right: 10px;
+    }
+    
+    /* Migliora la leggibilità delle card */
+    .calendar-day {
+        padding: 12px;
+    }
+    
+    .calendar-day-header h4 {
+        font-size: 1em;
+    }
+    
+    /* Select più grandi per il touch */
+    .conductor-select {
+        padding: 12px 8px;
+        font-size: 16px;
+    }
+    
+    /* Gestione overflow per tabelle orizzontali */
+    .public-days-columns-container {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Layout a colonne per i giorni dell'opera pubblica */
+    .public-day-column {
+        min-width: 280px;
+    }
+    
+    /* Pulsanti di azione in colonna */
+    .flex {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .flex .btn {
+        width: 100%;
+        margin: 5px 0;
+    }
+    
+    /* Migliora la visualizzazione delle date */
+    .last-conducted {
+        font-size: 11px;
+        padding: 8px;
+    }
+    
+    /* Riduci gli spazi bianchi */
+    .info-box {
+        padding: 12px;
+        margin: 15px 0;
+    }
+    
+    /* Adatta i pannelli PDF */
+    .pdf-generator-panel .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .pdf-generator-panel input {
+        padding: 12px;
+        font-size: 16px;
+    }
+}
+ /* Evita lo zoom automatico su iOS */
+        @media screen and (-webkit-min-device-pixel-ratio: 0) {
+            select,
+            textarea,
+            input {
+                font-size: 16px !important;
+            }
+        }
+
+        /* Semplifica l'interfaccia per schermi molto piccoli */
+        @media (max-width: 480px) {
+            /* Nasconde alcune informazioni non essenziali su schermi molto piccoli */
+            .calendar-day-info p:last-child {
+                display: none; /* Nasconde il contatore dei conduttori */
+            }
+            
+            .badge {
+                font-size: 10px;
+                padding: 3px 6px;
+            }
+            
+            .day-indicator {
+                font-size: 10px;
+                padding: 3px 8px;
+            }
+            
+            /* Semplifica le card dei giorni */
+            .calendar-day-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -3703,7 +3886,72 @@ function loadConfiguration() {
         }
     }
 }
+// Supporto swipe per mobile (versione migliorata)
+let touchStartX = 0;
+let touchEndX = 0;
+let swipeEnabled = true; // Puoi disabilitare lo swipe se necessario
 
+document.addEventListener('touchstart', e => {
+    if (!swipeEnabled) return;
+    touchStartX = e.changedTouches[0].screenX;
+}, { passive: true });
+
+document.addEventListener('touchend', e => {
+    if (!swipeEnabled) return;
+    touchEndX = e.changedTouches[0].screenX;
+    handleSwipe();
+}, { passive: true });
+
+function handleSwipe() {
+    // Controlla se la differenza è abbastanza grande (evita swipe accidentali)
+    const diffX = Math.abs(touchEndX - touchStartX);
+    if (diffX < 50) return; // Soglia minima per considerare uno swipe
+    
+    const tabs = ['config', 'field', 'public'];
+    const activeTabBtn = document.querySelector('.tab-btn.active');
+    
+    if (!activeTabBtn) {
+        console.warn('Nessun tab attivo trovato');
+        return;
+    }
+    
+    const onclickAttr = activeTabBtn.getAttribute('onclick');
+    if (!onclickAttr) {
+        console.warn('Attributo onclick non trovato sul tab attivo');
+        return;
+    }
+    
+    const match = onclickAttr.match(/'([^']+)'/);
+    if (!match || match.length < 2) {
+        console.warn('Pattern del tab non riconosciuto:', onclickAttr);
+        return;
+    }
+    
+    const currentTab = match[1];
+    const currentIndex = tabs.indexOf(currentTab);
+    
+    if (currentIndex === -1) {
+        console.warn('Tab non trovato nella lista:', currentTab);
+        return;
+    }
+    
+    if (touchEndX < touchStartX - 50) {
+        // Swipe a sinistra - prossimo tab
+        const nextIndex = (currentIndex + 1) % tabs.length;
+        console.log('Swipe sinistra: da', currentTab, 'a', tabs[nextIndex]);
+        showTab(tabs[nextIndex]);
+    } else if (touchEndX > touchStartX + 50) {
+        // Swipe a destra - tab precedente
+        const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        console.log('Swipe destra: da', currentTab, 'a', tabs[prevIndex]);
+        showTab(tabs[prevIndex]);
+    }
+}
+
+// Opzionale: funzione per disabilitare/abilitare lo swipe
+function enableSwipe(enable) {
+    swipeEnabled = enable;
+}
         // Rendi le funzioni globali
         window.saveMonthlyProgram = saveMonthlyProgram;
         window.generaPDFServizioCampo = generaPDFServizioCampo;
