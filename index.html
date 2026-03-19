@@ -581,7 +581,22 @@
                     <br>• Puoi modificare i nomi o rimuoverli con il pulsante "✗"
                 </div>
             </div>
-
+            <!-- PANNELLO BACKUP E RIPRISTINO -->
+            <div style="margin-top: 20px; padding: 15px; background: #e8e8ff; border-radius: 10px;">
+                <h4>💾 Backup e Ripristino Dati</h4>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                    <button class="btn btn-success" onclick="esportaDati()">📤 Esporta Backup</button>
+                    <div style="display: flex; gap: 5px; align-items: center; flex-wrap: wrap;">
+                        <input type="file" id="file-import" accept=".json" style="display: none;">
+                        <button class="btn btn-warning" onclick="document.getElementById('file-import').click()">📂 Seleziona File</button>
+                        <button class="btn btn-success" onclick="importaDati()">📥 Importa Backup</button>
+                    </div>
+                </div>
+                <small style="color: #666; display: block; margin-top: 10px;">
+                    Esporta un backup di tutti i tuoi dati (configurazioni, disponibilità, storico, programmi). 
+                    Puoi importarlo su un altro dispositivo per continuare da dove hai lasciato.
+                </small>
+            </div>
             <div class="text-center mt-4" style="display: flex; gap: 10px; justify-content: center;">
     <button class="btn" onclick="saveConfiguration()">💾 Salva Configurazione</button>
     <button class="btn btn-warning" onclick="aggiornaDateUltimaConduzionePublic()">🔄 Aggiorna Date Ultima Conduzione</button>
@@ -2566,7 +2581,52 @@ function svuotaProgrammaMesePublic() {
             
             alert(`✅ Programma di ${data.type} per ${monthName} ${year} salvato con successo!\n${data.assignments.length} appuntamenti salvati.`);
         }
-
+function esportaDati() {
+    const datiDaEsportare = {
+        appState: appState,
+        dataEsportazione: new Date().toLocaleString()
+    };
+    const datiJson = JSON.stringify(datiDaEsportare, null, 2);
+    const blob = new Blob([datiJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `backup_gestione_conduttori_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    alert('Backup dei dati esportato con successo!');
+}
+function importaDati() {
+    const input = document.getElementById('file-import');
+    if (input.files.length === 0) {
+        alert('Seleziona prima un file di backup.');
+        return;
+    }
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const datiImportati = JSON.parse(e.target.result);
+            if (datiImportati.appState) {
+                appState = datiImportati.appState;
+                // Assicurati che tutte le proprietà necessarie esistano (per robustezza)
+                if (!appState.disponibilita) appState.disponibilita = { field: [], public: [] };
+                if (!appState.public.conductorHistory) appState.public.conductorHistory = {};
+                
+                saveConfiguration(); // Salva nel localStorage del browser corrente
+                alert('Dati ripristinati con successo! La pagina verrà ricaricata.');
+                location.reload(); // Ricarica per applicare tutto
+            } else {
+                alert('Il file non contiene dati validi.');
+            }
+        } catch (error) {
+            alert('Errore durante la lettura del file: ' + error);
+        }
+    };
+    reader.readAsText(file);
+}
         // Funzione per generare PDF del Servizio di Campo (da programmi adunanze 4.html)
         function generaPDFServizioCampo() {
             console.log("🚀 Avvio generazione PDF Servizio di Campo");
@@ -3654,6 +3714,8 @@ function loadConfiguration() {
         window.removePublicConductor3 = removePublicConductor3;
 	window.aggiornaDateUltimaConduzionePublic = aggiornaDateUltimaConduzionePublic;
 	window.rigeneraStoricoDaAssegnazioni = rigeneraStoricoDaAssegnazioni;
+	window.esportaDati = esportaDati;
+	window.importaDati = importaDati;
 
         // Inizializzazione
         initializeYears();
