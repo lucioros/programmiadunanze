@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestione Turni - Conduttori per Giorno</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         /* Stili */
         * {
@@ -780,6 +781,31 @@
                     Puoi importarlo su un altro dispositivo per continuare da dove hai lasciato.
                 </small>
             </div>
+           <!-- ↓ INSERISCI QUI IL PANNELLO DI AUTENTICAZIONE ↓ -->
+            <!-- PANNELLO AUTENTICAZIONE SUPABASE -->
+            <div style="margin-top: 20px; padding: 15px; background: #e0f2fe; border-radius: 10px; border-left: 4px solid #0284c7;">
+                <h4>🔐 Sincronizzazione Cloud</h4>
+                <div id="auth-section">
+                    <div id="logged-out-view" style="display: block;">
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;">
+                            <input type="email" id="login-email" placeholder="Email" style="flex: 2; padding: 8px; border: 1px solid #0284c7; border-radius: 5px;">
+                            <input type="password" id="login-password" placeholder="Password" style="flex: 2; padding: 8px; border: 1px solid #0284c7; border-radius: 5px;">
+                            <button class="btn btn-sm" onclick="handleLogin()" style="background: #0284c7;">🔑 Login</button>
+                            <button class="btn btn-sm" onclick="handleRegister()" style="background: #059669;">📝 Registrati</button>
+                        </div>
+                        <small style="color: #666;">Accedi per sincronizzare i dati tra tutti i tuoi dispositivi</small>
+                    </div>
+                    
+                    <div id="logged-in-view" style="display: none;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <span id="user-email" style="font-weight: bold; color: #0284c7;"></span>
+                            <button class="btn btn-sm btn-danger" onclick="handleLogout()">🚪 Logout</button>
+                            <button class="btn btn-sm" onclick="syncNow()" style="background: #0284c7;">🔄 Sincronizza ora</button>
+                        </div>
+                        <small style="color: #666; display: block; margin-top: 5px;">I tuoi dati sono automaticamente salvati nel cloud</small>
+                    </div>
+                </div>
+            </div>
             <div class="text-center mt-4" style="display: flex; gap: 10px; justify-content: center;">
     <button class="btn" onclick="saveConfiguration()">💾 Salva Configurazione</button>
     <button class="btn btn-warning" onclick="aggiornaDateUltimaConduzionePublic()">🔄 Aggiorna Date Ultima Conduzione</button>
@@ -967,7 +993,294 @@
                 assignments: {}
             }
         };
+ // Inizializza Supabase
+        const supabaseUrl = 'https://onlzkeludawminonxayz.supabase.co';
+        const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ubHprZWx1ZGF3bWlub254YXl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MjY4NjAsImV4cCI6MjA4OTUwMjg2MH0.Jwoe44c8VRE1sj_MWHR3hxsTxyspitA4_hGrL_W-tvg';
+        if (!window.supabaseClient) {
+    window.supabaseClient = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+}
+var supabase = window.supabaseClient;
 
+        // Variabile per tracciare se l'utente è loggato
+        let currentUser = null;
+// Funzione di registrazione
+async function register(email, password, fullName) {
+    try {
+        const { data, error } = await supabase.auth.signUp({
+            email: email,
+            password: password,
+            options: {
+                data: {
+                    full_name: fullName
+                }
+            }
+        });
+        
+        if (error) throw error;
+        
+        if (data.user) {
+            // Crea il profilo utente
+            await supabase.from('profiles').insert({
+                id: data.user.id,
+                email: email,
+                full_name: fullName
+            });
+            
+            alert('Registrazione completata! Controlla la tua email per confermare.');
+        }
+    } catch (error) {
+        console.error('Errore registrazione:', error);
+        alert('Errore: ' + error.message);
+    }
+}
+
+// Funzione di login
+// Funzione di login
+async function login(email, password) {
+    try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email: email,
+            password: password
+        });
+        
+        if (error) throw error;
+        
+        currentUser = data.user;
+        console.log('Login effettuato:', currentUser.email);
+        
+        // Carica i dati dal cloud
+        await loadUserData();
+        await migrateExistingData();
+        
+        // AGGIUNGI QUESTA RIGA - aggiorna l'interfaccia
+        updateAuthUI();
+        
+        return true;
+    } catch (error) {
+        console.error('Errore login:', error);
+        alert('Errore: ' + error.message);
+        return false;
+    }
+}
+
+// Funzione di logout
+async function logout() {
+    try {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+        
+        currentUser = null;
+        
+        // Ricarica i dati locali (vuoti o di default)
+        resetToLocalData();
+        
+        alert('Logout effettuato');
+    } catch (error) {
+        console.error('Errore logout:', error);
+    }
+}
+
+// Controlla se c'è una sessione attiva al caricamento
+async function checkSession() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+        currentUser = session.user;
+        await loadUserData();
+        // AGGIUNGI QUESTA RIGA
+        updateAuthUI();
+    }
+}
+// Carica i dati dal cloud
+// Carica i dati dal cloud
+async function loadUserData() {
+    if (!currentUser) return;
+    
+    try {
+        const { data, error } = await supabase
+            .from('user_data')
+            .select('app_state')
+            .eq('user_id', currentUser.id)
+            .maybeSingle();
+        
+        if (error) throw error;
+        
+        if (data && data.app_state) {
+            // I dati cloud hanno la precedenza
+            appState = data.app_state;
+            saveConfiguration(); // Salva in locale come cache
+            console.log('Dati caricati dal cloud');
+        } else {
+            // Prima volta che l'utente accede: carica i dati locali nel cloud
+            await uploadUserData();
+        }
+        
+        // Aggiorna l'interfaccia
+        renderFieldDays();
+        renderPublicDays();
+        renderDisponibilita();
+        
+        // AGGIUNGI QUESTA RIGA - aggiorna l'UI di autenticazione
+        updateAuthUI();
+        
+    } catch (error) {
+        console.error('Errore caricamento dati:', error);
+    }
+}
+
+// Salva i dati nel cloud
+async function uploadUserData() {
+    if (!currentUser) return;
+    
+    try {
+        const { error } = await supabase
+            .from('user_data')
+            .upsert({
+                user_id: currentUser.id,
+                app_state: appState,
+                updated_at: new Date()
+            }, {
+                onConflict: 'user_id'
+            });
+        
+        if (error) throw error;
+        console.log('Dati salvati nel cloud');
+    } catch (error) {
+        console.error('Errore salvataggio cloud:', error);
+    }
+}
+
+// Funzione di fallback per dati locali
+function resetToLocalData() {
+    const saved = localStorage.getItem('appState');
+    if (saved) {
+        appState = JSON.parse(saved);
+    } else {
+        // Torna ai dati di default
+        appState = {
+            disponibilita: { field: [], public: [] },
+            field: { days: [], assignments: {} },
+            public: { days: [], assignments: {}, conductorHistory: {} }
+        };
+    }
+    renderFieldDays();
+    renderPublicDays();
+    renderDisponibilita();
+}
+/// Gestori per l'interfaccia - AGGIUNGI QUESTE FUNZIONI
+async function handleLogin() {
+    console.log('handleLogin chiamata');
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+    
+    if (!email || !password) {
+        alert('Inserisci email e password');
+        return;
+    }
+    
+    const success = await login(email, password);
+    if (success) {
+        // updateAuthUI è già chiamata dentro login, ma per sicurezza:
+        updateAuthUI();
+        alert('Login effettuato con successo!');
+    }
+}
+async function handleRegister() {
+    console.log('handleRegister chiamata');
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+    
+    if (!email || !password) {
+        alert('Inserisci email e password');
+        return;
+    }
+    
+    if (password.length < 6) {
+        alert('La password deve essere di almeno 6 caratteri');
+        return;
+    }
+    
+    await register(email, password, email.split('@')[0]);
+    
+    // Dopo la registrazione, prova a fare il login automatico
+    const success = await login(email, password);
+    if (success) {
+        updateAuthUI();
+        alert('Registrazione e login completati!');
+    }
+}
+function updateAuthUI() {
+    const loggedOut = document.getElementById('logged-out-view');
+    const loggedIn = document.getElementById('logged-in-view');
+    const userEmail = document.getElementById('user-email');
+    
+    console.log('updateAuthUI chiamata, currentUser:', currentUser ? currentUser.email : 'null');
+    
+    if (currentUser) {
+        if (loggedOut) loggedOut.style.display = 'none';
+        if (loggedIn) loggedIn.style.display = 'block';
+        if (userEmail) userEmail.textContent = currentUser.email;
+        console.log('UI aggiornata: utente loggato -', currentUser.email);
+    } else {
+        if (loggedOut) loggedOut.style.display = 'block';
+        if (loggedIn) loggedIn.style.display = 'none';
+        console.log('UI aggiornata: nessun utente loggato');
+    }
+}
+
+async function syncNow() {
+    if (!currentUser) {
+        alert('Devi effettuare il login prima di sincronizzare');
+        return;
+    }
+    
+    await uploadUserData();
+    alert('Sincronizzazione completata!');
+}
+// Funzione per migrare i dati esistenti (chiamala dopo il primo login)
+        async function migrateExistingData() {
+            if (!currentUser) return;
+            
+            // Controlla se ci sono dati locali
+            const localData = localStorage.getItem('appState');
+            if (localData) {
+                const conferma = confirm('Sono stati trovati dati locali. Vuoi caricarli nel cloud?');
+                if (conferma) {
+                    appState = JSON.parse(localData);
+                    
+                    // Assicurati che le strutture dati siano valide
+                    if (!appState.disponibilita) appState.disponibilita = { field: [], public: [] };
+                    if (!appState.public.conductorHistory) appState.public.conductorHistory = {};
+                    
+                    await uploadUserData();
+                    alert('Dati locali migrati nel cloud con successo!');
+                    
+                    // Ricarica la pagina per applicare i cambiamenti
+                    location.reload();
+                }
+            } else {
+                alert('Nessun dato locale trovato da migrare.');
+            }
+        }
+
+// Aggiungi un listener per rilevare quando si torna online
+        window.addEventListener('online', async function() {
+            if (currentUser) {
+                console.log('Connessione ripristinata, sincronizzazione...');
+                
+                // Carica i dati più recenti dal cloud
+                await loadUserData();
+                
+                // Aggiorna l'interfaccia
+                updateAuthUI();
+                
+                // Notifica l'utente
+                const toast = document.createElement('div');
+                toast.style.cssText = 'position:fixed; bottom:20px; right:20px; background:#059669; color:white; padding:10px 20px; border-radius:5px; z-index:9999; box-shadow: 0 2px 10px rgba(0,0,0,0.2);';
+                toast.textContent = '✅ Sincronizzazione completata!';
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+            }
+        });
         // Giorni della settimana
         const weekDays = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato', 'Domenica'];
 
@@ -2767,7 +3080,8 @@ function svuotaProgrammaMesePublic() {
 function esportaDati() {
     const datiDaEsportare = {
         appState: appState,
-        dataEsportazione: new Date().toLocaleString()
+        dataEsportazione: new Date().toLocaleString(),
+        versione: '2.0-con-cloud'
     };
     const datiJson = JSON.stringify(datiDaEsportare, null, 2);
     const blob = new Blob([datiJson], { type: 'application/json' });
@@ -2789,7 +3103,7 @@ function importaDati() {
     }
     const file = input.files[0];
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {  // ← AGGIUNGI async
         try {
             const datiImportati = JSON.parse(e.target.result);
             if (datiImportati.appState) {
@@ -2799,6 +3113,13 @@ function importaDati() {
                 if (!appState.public.conductorHistory) appState.public.conductorHistory = {};
                 
                 saveConfiguration(); // Salva nel localStorage del browser corrente
+                
+                // ← AGGIUNGI QUESTA PARTE: sincronizza con il cloud se l'utente è loggato
+                if (currentUser) {
+                    await uploadUserData();
+                    console.log('Dati sincronizzati con il cloud dopo importazione');
+                }
+                
                 alert('Dati ripristinati con successo! La pagina verrà ricaricata.');
                 location.reload(); // Ricarica per applicare tutto
             } else {
@@ -3832,11 +4153,16 @@ function assignPublicConductor(date, position, conductor, dayId) {
             }
         }
 
-        function saveConfiguration() {
-            localStorage.setItem('appState', JSON.stringify(appState));
-            console.log('Configurazione salvata');
-        }
-
+async function saveConfiguration() {
+    // Salva sempre in locale (per accesso offline)
+    localStorage.setItem('appState', JSON.stringify(appState));
+    console.log('Configurazione salvata in locale');
+    
+    // Se l'utente è loggato, salva anche nel cloud
+    if (currentUser) {
+        await uploadUserData();
+    }
+}
 function loadConfiguration() {
     const saved = localStorage.getItem('appState');
     if (saved) {
@@ -3886,22 +4212,6 @@ function loadConfiguration() {
         }
     }
 }
-// Supporto swipe per mobile (versione migliorata)
-let touchStartX = 0;
-let touchEndX = 0;
-let swipeEnabled = true; // Puoi disabilitare lo swipe se necessario
-
-document.addEventListener('touchstart', e => {
-    if (!swipeEnabled) return;
-    touchStartX = e.changedTouches[0].screenX;
-}, { passive: true });
-
-document.addEventListener('touchend', e => {
-    if (!swipeEnabled) return;
-    touchEndX = e.changedTouches[0].screenX;
-    handleSwipe();
-}, { passive: true });
-
 function handleSwipe() {
     // Controlla se la differenza è abbastanza grande (evita swipe accidentali)
     const diffX = Math.abs(touchEndX - touchStartX);
@@ -3971,6 +4281,7 @@ function enableSwipe(enable) {
         renderFieldDays();
         renderPublicDays();
         renderDisponibilita();
+	checkSession();
     </script>
 </body>
 </html>
