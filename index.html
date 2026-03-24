@@ -840,7 +840,23 @@
 <button class="btn btn-danger" style="background: #dc3545;" onclick="svuotaProgrammaMeseField()">🧹 Svuota Programma Corrente</button>
                 </div>
             </div>
-
+ <!-- FILTRO SEMPLIFICATO GIORNI/ORARI -->
+    <div class="filter-panel" style="background: #f0f0f0; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div>
+                <h4 style="margin: 0 0 5px 0;">🔍 Filtra per giorno/orario</h4>
+                <small style="color: #666;">Seleziona una combinazione per visualizzare solo quelle specifiche adunanze</small>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-sm" onclick="resetFieldFilter()" style="background: #6c757d;">📅 Tutti i giorni</button>
+                <button class="btn btn-sm" onclick="clearFieldFilter()" style="background: #dc3545;">🗑️ Deseleziona tutto</button>
+            </div>
+        </div>
+        
+        <div id="field-filter-buttons" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px;">
+            <!-- I pulsanti verranno generati dinamicamente -->
+        </div>
+    </div>
             <div id="field-calendar" class="calendar"></div>
         </div>
 
@@ -1363,6 +1379,165 @@ function sortConductorsByPriority(conductors, lastConducted, excludeList = []) {
         return a.localeCompare(b);
     });
 }
+// Variabili per il filtro del servizio di campo
+let fieldFilterEnabled = false;
+let fieldFilterSelection = null; // Memorizza la combinazione selezionata (es: "Martedì_18:00")
+
+// Funzione per generare i pulsanti del filtro
+function renderFieldFilterButtons() {
+    const container = document.getElementById('field-filter-buttons');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    // Raccogli tutte le combinazioni uniche di giorno e orario dalle assegnazioni del mese corrente
+    const month = parseInt(document.getElementById('field-month').value);
+    const year = parseInt(document.getElementById('field-year').value);
+    const uniqueCombinations = new Map(); // Usa Map per evitare duplicati
+    
+    if (appState && appState.field && appState.field.assignments) {
+        Object.keys(appState.field.assignments).forEach(key => {
+            const parts = key.split('_');
+            const datePart = parts[0];
+            const timePart = parts[1];
+            const [y, m, d] = datePart.split('-').map(Number);
+            
+            if (y === year && m === month + 1) {
+                // Crea una chiave unica per la combinazione giorno/orario
+                const dateObj = new Date(y, m - 1, d);
+                const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+                const dayName = dayNames[dateObj.getDay()];
+                const comboKey = `${dayName}_${timePart}`;
+                
+                if (!uniqueCombinations.has(comboKey)) {
+                    uniqueCombinations.set(comboKey, {
+                        dayName: dayName,
+                        time: timePart,
+                        display: `${dayName} - ore ${timePart}`,
+                        count: 0
+                    });
+                }
+                // Incrementa il conteggio per questa combinazione
+                const combo = uniqueCombinations.get(comboKey);
+                combo.count++;
+            }
+        });
+    }
+    
+    // Converti la Map in array e ordina per giorno della settimana
+    const sortedCombinations = Array.from(uniqueCombinations.values()).sort((a, b) => {
+        const dayOrder = {
+            'Lunedì': 1, 'Martedì': 2, 'Mercoledì': 3, 'Giovedì': 4, 'Venerdì': 5, 'Sabato': 6, 'Domenica': 7
+        };
+        if (dayOrder[a.dayName] !== dayOrder[b.dayName]) {
+            return dayOrder[a.dayName] - dayOrder[b.dayName];
+        }
+        return a.time.localeCompare(b.time);
+    });
+    
+    if (sortedCombinations.length === 0) {
+        container.innerHTML = '<span style="color: #999; padding: 10px;">Nessuna assegnazione nel mese corrente</span>';
+        return;
+    }
+    
+    // Crea i pulsanti per ogni combinazione
+    sortedCombinations.forEach(combo => {
+        const button = document.createElement('button');
+        const comboKey = `${combo.dayName}_${combo.time}`;
+        const isActive = (fieldFilterEnabled && fieldFilterSelection === comboKey);
+        
+        button.textContent = `${combo.display} (${combo.count})`;
+        button.className = 'btn btn-sm';
+        button.style.background = isActive ? '#48bb78' : '#e9ecef';
+        button.style.color = isActive ? 'white' : '#333';
+        button.style.border = isActive ? '2px solid #2c6e2c' : '1px solid #ccc';
+        button.style.cursor = 'pointer';
+        button.style.padding = '8px 16px';
+        button.style.borderRadius = '20px';
+        button.style.fontSize = '13px';
+        button.style.fontWeight = isActive ? 'bold' : 'normal';
+        
+        // Colore in base al giorno della settimana
+        const dayColors = {
+            'Lunedì': '#4299e1',
+            'Martedì': '#48bb78',
+            'Mercoledì': '#ed8936',
+            'Giovedì': '#9f7aea',
+            'Venerdì': '#f56565',
+            'Sabato': '#667eea',
+            'Domenica': '#d53f8c'
+        };
+        if (!isActive) {
+            button.style.borderLeft = `4px solid ${dayColors[combo.dayName] || '#667eea'}`;
+        }
+        
+        button.onclick = () => {
+            if (fieldFilterEnabled && fieldFilterSelection === comboKey) {
+                // Se clicco sulla stessa combinazione, disattivo il filtro
+                resetFieldFilter();
+            } else {
+                // Attivo il filtro per questa combinazione
+                fieldFilterEnabled = true;
+                fieldFilterSelection = comboKey;
+                renderFieldFilterButtons(); // Aggiorna i pulsanti
+                renderFieldCalendar(); // Ricarica il calendario
+            }
+        };
+        
+        container.appendChild(button);
+    });
+    
+    // Aggiungi un indicatore del filtro attivo
+    if (fieldFilterEnabled && fieldFilterSelection) {
+        const filterInfo = document.createElement('div');
+        filterInfo.style.marginTop = '10px';
+        filterInfo.style.padding = '8px';
+        filterInfo.style.background = '#e8f5e9';
+        filterInfo.style.borderRadius = '8px';
+        filterInfo.style.fontSize = '12px';
+        filterInfo.style.color = '#2c6e2c';
+        filterInfo.innerHTML = `🔍 Filtro attivo: solo ${fieldFilterSelection.replace('_', ' - ore ')}`;
+        container.appendChild(filterInfo);
+    }
+}
+
+// Funzione per resettare il filtro (mostra tutti)
+function resetFieldFilter() {
+    fieldFilterEnabled = false;
+    fieldFilterSelection = null;
+    renderFieldFilterButtons();
+    renderFieldCalendar();
+}
+
+// Funzione per deselezionare tutto (come reset)
+function clearFieldFilter() {
+    resetFieldFilter();
+}
+
+// Funzione per verificare se un giorno/orario deve essere mostrato
+function shouldShowFieldAssignment(item) {
+    if (!fieldFilterEnabled || !fieldFilterSelection) return true;
+    
+    // Costruisci la chiave di filtro per questo item
+    const dateObj = new Date(item.dateStr);
+    const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+    const dayName = dayNames[dateObj.getDay()];
+    const itemComboKey = `${dayName}_${item.time}`;
+    
+    return itemComboKey === fieldFilterSelection;
+}
+
+// Funzione per aggiornare il filtro quando cambia mese/anno
+function updateFieldFilterOptions() {
+    renderFieldFilterButtons();
+}
+
+// Funzione per applicare il filtro (mantenuta per compatibilità)
+function applyFieldFilter() {
+    // Questa funzione non è più necessaria con la nuova UI, ma la manteniamo per compatibilità
+    renderFieldFilterButtons();
+}
+
 function trovaUltimaDataDaStorico(conduttore, giornoDellaSettimana) {
     if (!appState.public.conductorHistory) return null;
     
@@ -2543,8 +2718,28 @@ function renderFieldCalendar() {
         return a.time.localeCompare(b.time);
     });
     
-    // Mostra tutte le assegnazioni (anche stesso giorno con orari diversi)
-    assignmentsDelMese.forEach(item => {
+    // Mostra solo le assegnazioni che passano il filtro
+    const filteredAssignments = assignmentsDelMese.filter(item => shouldShowFieldAssignment(item));
+    
+    if (filteredAssignments.length === 0 && assignmentsDelMese.length > 0 && fieldFilterEnabled) {
+        // Mostra un messaggio quando il filtro è attivo ma non ci sono risultati
+        const emptyMessage = document.createElement('div');
+        emptyMessage.style.textAlign = 'center';
+        emptyMessage.style.padding = '40px';
+        emptyMessage.style.background = '#f8f9fa';
+        emptyMessage.style.borderRadius = '12px';
+        emptyMessage.style.color = '#666';
+        emptyMessage.innerHTML = `
+            <p>🔍 Nessuna adunanza corrisponde al filtro selezionato.</p>
+            <p>Clicca su "Tutti i giorni" per vedere tutte le adunanze.</p>
+        `;
+        calendar.appendChild(emptyMessage);
+        console.log(`✅ Mostrate 0 assegnazioni (filtrate) per ${monthNames[month]} ${year}`);
+        return;
+    }
+    
+    // Mostra tutte le assegnazioni filtrate
+    filteredAssignments.forEach(item => {
         const d = item.day;
         const dateStr = item.dateStr;
         const time = item.time;
@@ -2654,7 +2849,7 @@ function renderFieldCalendar() {
         }, 0);
     });
     
-    console.log(`✅ Mostrate ${assignmentsDelMese.length} assegnazioni per ${monthNames[month]} ${year}`);
+    console.log(`✅ Mostrate ${filteredAssignments.length} assegnazioni per ${monthNames[month]} ${year}${fieldFilterEnabled ? ' (filtrate)' : ''}`);
 }
 
 function renderPublicCalendar() {
@@ -4410,6 +4605,37 @@ function enableSwipe(enable) {
         renderPublicDays();
         renderDisponibilita();
 	checkSession();
+
+      // Inizializza i pulsanti del filtro
+        renderFieldFilterButtons();
+        
+        // Aggiungi event listener per aggiornare il filtro quando cambia mese/anno
+        const fieldMonthSelect = document.getElementById('field-month');
+        const fieldYearSelect = document.getElementById('field-year');
+        
+        if (fieldMonthSelect) {
+            const originalOnChange = fieldMonthSelect.getAttribute('onchange');
+            if (originalOnChange) {
+                fieldMonthSelect.setAttribute('onchange', `${originalOnChange}; updateFieldFilterOptions();`);
+            } else {
+                fieldMonthSelect.addEventListener('change', function() {
+                    updateFieldFilterOptions();
+                    renderFieldCalendar();
+                });
+            }
+        }
+        
+        if (fieldYearSelect) {
+            const originalOnChange = fieldYearSelect.getAttribute('onchange');
+            if (originalOnChange) {
+                fieldYearSelect.setAttribute('onchange', `${originalOnChange}; updateFieldFilterOptions();`);
+            } else {
+                fieldYearSelect.addEventListener('change', function() {
+                    updateFieldFilterOptions();
+                    renderFieldCalendar();
+                });
+            }
+        }
     </script>
 </body>
 </html>
