@@ -2503,6 +2503,7 @@ function addPublicDay() {
         }
 
         // FUNZIONI CALENDARIO (da programmi adunanze 4.html)
+
 function renderFieldCalendar() {
     const month = parseInt(document.getElementById('field-month').value);
     const year = parseInt(document.getElementById('field-year').value);
@@ -2515,107 +2516,145 @@ function renderFieldCalendar() {
     
     if (!appState.field.assignments) appState.field.assignments = {};
     
-    for (let d = 1; d <= lastDay.getDate(); d++) {
+    // 🔥 NUOVA LOGICA: legge chiavi con formato DATA_ORA
+    const assignmentsDelMese = [];
+    
+    Object.keys(appState.field.assignments).forEach(key => {
+        const parts = key.split('_'); // es: 2026-03-15_09:30
+        const datePart = parts[0];
+        const timePart = parts[1];
+        
+        const [y, m, d] = datePart.split('-').map(Number);
+        
+        if (y === year && m === month + 1) {
+            assignmentsDelMese.push({
+                key: key,
+                dateStr: datePart,
+                time: timePart,
+                day: d,
+                assignment: appState.field.assignments[key]
+            });
+        }
+    });
+    
+    // 🔥 Ordina per giorno + orario
+    assignmentsDelMese.sort((a, b) => {
+        if (a.day !== b.day) return a.day - b.day;
+        return a.time.localeCompare(b.time);
+    });
+    
+    // Mostra tutte le assegnazioni (anche stesso giorno con orari diversi)
+    assignmentsDelMese.forEach(item => {
+        const d = item.day;
+        const dateStr = item.dateStr;
+        const time = item.time;
+        const key = item.key;
+        const assignment = item.assignment;
+        
+        const assignedConductor = assignment ? assignment.conductor : '';
+        const savedDayId = assignment ? assignment.dayId : null;
+        
+        const dayConfig = appState.field.days.find(day => day.id === savedDayId);
+        
+        if (!dayConfig) {
+            console.warn(`Configurazione non trovata per ID: ${savedDayId}`);
+            return;
+        }
+        
         const date = new Date(year, month, d);
         const dayName = weekDays[date.getDay() === 0 ? 6 : date.getDay() - 1];
         
-        const dayConfig = appState.field.days.find(day => day.day === dayName && day.enabled);
+        const dayCard = document.createElement('div');
+        dayCard.className = 'calendar-day';
         
-        if (dayConfig) {
-            const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-            const assignment = appState.field.assignments[dateStr];
-            const assignedConductor = assignment ? assignment.conductor : '';
-            
-            const dayCard = document.createElement('div');
-            dayCard.className = 'calendar-day';
-            
-            const conductorsForDay = dayConfig.conductors || [];
-            
-            // Ordina i conduttori per priorità usando le date di lastConducted
-            const sortedConductors = [...conductorsForDay].sort((a, b) => {
-                const dateA = dayConfig.lastConducted[a] || 0;
-                const dateB = dayConfig.lastConducted[b] || 0;
-                
-                // Chi non ha mai condotto (data = 0) viene prima
-                if (dateA === 0 && dateB > 0) return -1;
-                if (dateA > 0 && dateB === 0) return 1;
-                
-                // Poi per data più vecchia
-                return dateA - dateB;
-            });
-            
-            // Crea le opzioni per il select con le date corrette
-let optionsHtml = '<option value="">Seleziona conduttore</option>';
-sortedConductors.forEach(person => {
-    const lastDate = dayConfig.lastConducted[person];
-    let dateText = 'MAI';
-    let daysAgo = '';
-    
-    if (lastDate && lastDate > 0) {
-        dateText = formatDate(lastDate);
-        const assignmentDate = new Date(lastDate);
-        const now = new Date();
-        const diffTime = now - assignmentDate;
-        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        const conductorsForDay = dayConfig.conductors || [];
         
-        // Mostra solo per date passate o oggi
-        if (diffDays >= 0) {
-            if (diffDays === 0) daysAgo = ' (oggi)';
-            else if (diffDays === 1) daysAgo = ' (ieri)';
-            else if (diffDays > 1) daysAgo = ` (${diffDays} giorni fa)`;
-        }
-        // Se diffDays < 0 (data futura), non mostriamo nulla
-    }
-    
-    const selected = assignedConductor === person ? 'selected' : '';
-    const priorityClass = !lastDate ? 'priority-high' : 'priority-medium';
-    const prioritySymbol = !lastDate ? '🔴' : '🟡';
-    
-    optionsHtml += `<option value="${person}" ${selected} class="${priorityClass}">
-        ${prioritySymbol} ${person} - Ultima: ${dateText}${daysAgo}
-    </option>`;
-});            
-            // Mostra l'ultima conduzione del conduttore assegnato
-            let lastConductedInfo = '';
-            if (assignedConductor && dayConfig.lastConducted[assignedConductor]) {
-                const lastDate = dayConfig.lastConducted[assignedConductor];
-                const formattedDate = formatDate(lastDate);
-                const daysAgo = Math.floor((Date.now() - lastDate) / (1000 * 60 * 60 * 24));
-                lastConductedInfo = `<div class="last-conducted">
-                    <strong>Ultima conduzione di ${assignedConductor}:</strong> ${formattedDate} (${daysAgo} giorni fa)
-                </div>`;
+        // Ordina conduttori per priorità
+        const sortedConductors = [...conductorsForDay].sort((a, b) => {
+            const dateA = dayConfig.lastConducted[a] || 0;
+            const dateB = dayConfig.lastConducted[b] || 0;
+            
+            if (dateA === 0 && dateB > 0) return -1;
+            if (dateA > 0 && dateB === 0) return 1;
+            return dateA - dateB;
+        });
+        
+        // Opzioni select
+        let optionsHtml = '<option value="">Seleziona conduttore</option>';
+        sortedConductors.forEach(person => {
+            const lastDate = dayConfig.lastConducted[person];
+            let dateText = 'MAI';
+            let daysAgo = '';
+            
+            if (lastDate && lastDate > 0) {
+                dateText = formatDate(lastDate);
+                const assignmentDate = new Date(lastDate);
+                const now = new Date();
+                const diffTime = now - assignmentDate;
+                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                
+                if (diffDays >= 0) {
+                    if (diffDays === 0) daysAgo = ' (oggi)';
+                    else if (diffDays === 1) daysAgo = ' (ieri)';
+                    else if (diffDays > 1) daysAgo = ` (${diffDays} giorni fa)`;
+                }
             }
             
-            dayCard.innerHTML = `
-                <div class="calendar-day-header">
-                    <h4>
-                        <span class="day-indicator ${getDayColorClass(dayConfig.day)}">${dayConfig.day}</span>
-                        ${d} ${monthNames[month]} ${year}
-                    </h4>
-                    <span class="badge">Servizio di Campo</span>
-                </div>
-                <div class="calendar-day-info">
-                    <p><i>🕐</i> ${dayConfig.time}</p>
-                    <p><i>📍</i> ${dayConfig.location}</p>
-                    <p><i>👥</i> ${conductorsForDay.length} conduttori disponibili</p>
-                </div>
-                
-                <select class="conductor-select" onchange="assignFieldConductor('${dateStr}', '${dayConfig.id}', this.value)">
-                    ${optionsHtml}
-                </select>
-                
-                ${lastConductedInfo}
-                ${assignment ? 
-                    `<div class="last-conducted" style="margin-top: 5px; background: #e8e8ff;">
-                        <strong>Assegnato per questo giorno:</strong> ${assignedConductor}
-                    </div>` : 
-                    '<div class="last-conducted" style="background: #fff3cd;">Nessun conduttore assegnato per questo giorno</div>'
-                }
-            `;
+            const selected = assignedConductor === person ? 'selected' : '';
+            const priorityClass = !lastDate ? 'priority-high' : 'priority-medium';
+            const prioritySymbol = !lastDate ? '🔴' : '🟡';
             
-            calendar.appendChild(dayCard);
+            optionsHtml += `<option value="${person}" ${selected} class="${priorityClass}">
+                ${prioritySymbol} ${person} - Ultima: ${dateText}${daysAgo}
+            </option>`;
+        });
+        
+        // Info ultima conduzione
+        let lastConductedInfo = '';
+        if (assignedConductor && dayConfig.lastConducted[assignedConductor]) {
+            const lastDate = dayConfig.lastConducted[assignedConductor];
+            const formattedDate = formatDate(lastDate);
+            const daysAgo = Math.floor((Date.now() - lastDate) / (1000 * 60 * 60 * 24));
+            lastConductedInfo = `<div class="last-conducted">
+                <strong>Ultima conduzione di ${assignedConductor}:</strong> ${formattedDate} (${daysAgo} giorni fa)
+            </div>`;
         }
-    }
+        
+        dayCard.innerHTML = `
+            <div class="calendar-day-header">
+                <h4>
+                    <span class="day-indicator ${getDayColorClass(dayConfig.day)}">${dayConfig.day}</span>
+                    ${d} ${monthNames[month]} ${year}
+                    <span style="font-size: 11px; color: #666; margin-left: 8px;">🕐 ${time}</span>
+                </h4>
+                <span class="badge">Servizio di Campo</span>
+            </div>
+            <div class="calendar-day-info">
+                <p><i>📍</i> ${dayConfig.location}</p>
+                <p><i>👥</i> ${conductorsForDay.length} conduttori disponibili</p>
+            </div>
+            
+            <select class="conductor-select" onchange="assignFieldConductor('${dateStr}', '${dayConfig.id}', this.value, '${time}')">
+                ${optionsHtml}
+            </select>
+            
+            ${lastConductedInfo}
+            <div class="last-conducted" style="margin-top: 5px; background: #e8e8ff;">
+                <strong>Assegnato per questo orario:</strong> ${assignedConductor}
+            </div>
+        `;
+        
+        calendar.appendChild(dayCard);
+        
+        setTimeout(() => {
+            const select = dayCard.querySelector('.conductor-select');
+            if (select && assignedConductor) {
+                select.value = assignedConductor;
+            }
+        }, 0);
+    });
+    
+    console.log(`✅ Mostrate ${assignmentsDelMese.length} assegnazioni per ${monthNames[month]} ${year}`);
 }
 
 function renderPublicCalendar() {
@@ -3131,297 +3170,351 @@ function importaDati() {
     };
     reader.readAsText(file);
 }
-        // Funzione per generare PDF del Servizio di Campo (da programmi adunanze 4.html)
-        function generaPDFServizioCampo() {
-            console.log("🚀 Avvio generazione PDF Servizio di Campo");
+// Funzione per generare PDF del Servizio di Campo (da programmi adunanze 4.html)
+function generaPDFServizioCampo() {
+    console.log("🚀 Avvio generazione PDF Servizio di Campo");
+    
+    try {
+        const meseSelect = document.getElementById('field-month');
+        const annoSelect = document.getElementById('field-year');
+        
+        if (!meseSelect || !annoSelect) {
+            alert("Errore: Elementi mese/anno non trovati");
+            return;
+        }
+        
+        const mese = meseSelect.options[meseSelect.selectedIndex].text;
+        const anno = annoSelect.value;
+        const monthIndex = parseInt(meseSelect.value);
+        const year = parseInt(anno);
+        
+        console.log(`Generazione PDF Servizio di Campo per ${mese} ${anno}`);
+        
+        // Raccogli i dati dal pannello PDF
+        const cittaInput = document.getElementById('pdf-citta');
+        const citta = cittaInput ? cittaInput.value : 'SAN CATALDO CASALE';
+        
+        // Verifica jsPDF
+        if (typeof window.jspdf === 'undefined') {
+            alert("Errore: Libreria jsPDF non caricata. Verifica la connessione internet.");
+            return;
+        }
+        
+        const { jsPDF } = window.jspdf;
+        
+        const doc = new jsPDF({
+            orientation: 'portrait',
+            unit: 'mm',
+            format: 'a4'
+        });
+        
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const margin = 15;
+        const contentWidth = pageWidth - (margin * 2);
+        
+        let y = margin;
+        
+        function drawRect(x, y, w, h, fillColor, border = true, borderColor = '#000000') {
+            doc.setFillColor(fillColor);
+            if (border) {
+                doc.setDrawColor(borderColor);
+                doc.setLineWidth(0.2);
+            } else {
+                doc.setDrawColor(fillColor);
+            }
+            doc.roundedRect(x, y, w, h, 0, 0, 'FD');
+        }
+        
+        // Colori
+        const coloreBlu = '#2B5291';
+        const coloreBluScuro = '#2D5293';
+        const coloreGiallo = '#FFBF00';
+        const coloreGrigio = '#7D7D7D';
+        const coloreRosso = '#C00000';
+        const coloreGrigioChiaro = '#BEBEBE';
+        
+        const altezzaStriscia = 8;
+        
+        // Intestazione Blu
+        drawRect(margin, y, contentWidth, altezzaStriscia, coloreBlu);
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(18);
+        doc.setFont('helvetica', 'bold');
+        doc.text('ADUNANZE PER IL SERVIZIO DI CAMPO', pageWidth / 2, y + (altezzaStriscia / 2) + 2, { align: 'center' });
+        y += altezzaStriscia + 16.7;
+        
+        // Città Gialla
+        drawRect(margin, y, contentWidth, altezzaStriscia, coloreGiallo);
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(18);
+        doc.setFont('helvetica', 'bold');
+        doc.text(citta, pageWidth / 2, y + (altezzaStriscia / 2) + 2, { align: 'center' });
+        y += altezzaStriscia + 11.2;
+        
+        // Mese Grigio
+        drawRect(margin, y, contentWidth, altezzaStriscia, coloreGrigio);
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(18);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`${mese.toUpperCase()} ${anno}`, pageWidth / 2, y + (altezzaStriscia / 2) + 2, { align: 'center' });
+        y += altezzaStriscia + 11.7;
+        
+        // Raccogli tutte le assegnazioni del servizio di campo per il mese selezionato
+        const assignmentsByDate = [];
+        
+        if (appState && appState.field && appState.field.assignments) {
+            Object.entries(appState.field.assignments).forEach(([dateKey, assignment]) => {
+                // Estrai solo la parte della data dalla chiave che potrebbe essere "YYYY-MM-DD_HH:MM"
+                let datePart, orarioAssegnazione;
+                
+                if (dateKey.includes('_')) {
+                    [datePart, orarioAssegnazione] = dateKey.split('_');
+                } else {
+                    datePart = dateKey;
+                    orarioAssegnazione = '';
+                }
+                
+                const [y, m, d] = datePart.split('-').map(Number);
+                
+                if (y === year && m === monthIndex + 1) {
+                    // Crea l'oggetto data correttamente
+                    const dateObj = new Date(y, m - 1, d);
+                    
+                    // VERIFICA CHE LA DATA SIA VALIDA
+                    if (isNaN(dateObj.getTime())) {
+                        console.error(`Data non valida: ${datePart}`);
+                        return;
+                    }
+                    
+                    const giornoSettimana = dateObj.getDay();
+                    
+                    // Nomi dei giorni in italiano - array completo
+                    const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+                    const dayName = dayNames[giornoSettimana];
+                    
+                    // Cerca la configurazione usando l'ID salvato nell'assegnazione
+                    let dayConfig = null;
+                    if (assignment.dayId) {
+                        dayConfig = appState.field.days.find(day => day.id === assignment.dayId);
+                    }
+                    
+                    // Se non trova con l'ID, cerca per nome del giorno e orario
+                    if (!dayConfig) {
+                        // Cerca tra tutte le configurazioni attive
+                        const configsForDay = appState.field.days.filter(day => day.day === dayName && day.enabled === true);
+                        if (configsForDay.length === 1) {
+                            dayConfig = configsForDay[0];
+                        } else if (configsForDay.length > 1 && orarioAssegnazione) {
+                            // Se ci sono più configurazioni per lo stesso giorno, cerca quella con l'orario corrispondente
+                            dayConfig = configsForDay.find(day => day.time === orarioAssegnazione);
+                            if (!dayConfig && configsForDay.length > 0) {
+                                dayConfig = configsForDay[0];
+                            }
+                        } else if (configsForDay.length > 0) {
+                            dayConfig = configsForDay[0];
+                        }
+                    }
+                    
+                    const orario = dayConfig ? dayConfig.time : (orarioAssegnazione || '09:00');
+                    const luogo = dayConfig ? dayConfig.location : 'Sala del Regno';
+                    
+                    // Formatta la data in modo sicuro - usa il mese già in italiano dalla variabile
+                    const dataFormattata = `${dayName} ${d} ${mese} ${anno}`;
+                    
+                    assignmentsByDate.push({
+                        data: dataFormattata,
+                        dataNum: d,
+                        giorno: dayName,
+                        giornoSettimana: giornoSettimana,
+                        orario: orario,
+                        luogo: luogo,
+                        conduttore: assignment.conductor || '',
+                        dayId: assignment.dayId,
+                        dateObj: dateObj
+                    });
+                }
+            });
+        }
+        
+        // Ordina per data e poi per orario
+        assignmentsByDate.sort((a, b) => {
+            if (a.dataNum !== b.dataNum) {
+                return a.dataNum - b.dataNum;
+            }
+            return a.orario.localeCompare(b.orario);
+        });
+        
+        console.log(`Assegnazioni trovate per ${mese}:`, assignmentsByDate.length);
+        
+        if (assignmentsByDate.length === 0) {
+            doc.setFontSize(14);
+            doc.setTextColor(100, 100, 100);
+            doc.text("Nessuna assegnazione per questo mese", pageWidth / 2, y + 20, { align: 'center' });
+            doc.save(`Adunanze_Servizio_Campo_${mese}_${anno}.pdf`);
+            alert(`ℹ️ Nessuna assegnazione trovata per ${mese} ${anno}`);
+            return;
+        }
+        
+        // Larghezze delle colonne
+        const larghezzaData = 50;
+        const larghezzaOra = 25;
+        const larghezzaLuogo = 55;
+        const larghezzaConduttore = contentWidth - (larghezzaData + larghezzaOra + larghezzaLuogo);
+        
+        const colX = {
+            data: margin,
+            ora: margin + larghezzaData,
+            luogo: margin + larghezzaData + larghezzaOra,
+            conduttore: margin + larghezzaData + larghezzaOra + larghezzaLuogo
+        };
+        
+        // Intestazione colonne
+        const offsetLarghezza = 0.1;
+        doc.setFillColor(coloreRosso);
+        doc.roundedRect(margin - offsetLarghezza, y, contentWidth + (offsetLarghezza * 2), 8, 0, 0, 'F');
+        
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        
+        doc.text('DATA', colX.data + (larghezzaData / 2), y + 5, { align: 'center' });
+        doc.text('ORA', colX.ora + (larghezzaOra / 2) - 6.7, y + 5, { align: 'center' });
+        doc.text('LUOGO', colX.luogo + (larghezzaLuogo / 2) - 15.1, y + 5, { align: 'center' });
+        doc.text('CONDUTTORE', colX.conduttore + (larghezzaConduttore / 2) - 10.6, y + 5, { align: 'center' });
+        
+        y += 8;
+        
+        // Disegna le righe dati
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        
+        assignmentsByDate.forEach((assignment, index) => {
+            const rigaY = y + (index * 8);
             
-            try {
-                const meseSelect = document.getElementById('field-month');
-                const annoSelect = document.getElementById('field-year');
-                
-                if (!meseSelect || !annoSelect) {
-                    alert("Errore: Elementi mese/anno non trovati");
-                    return;
+            doc.text(assignment.data, colX.data + 2, rigaY + 5);
+            doc.text(assignment.orario, colX.ora + 2, rigaY + 5);
+            doc.text(assignment.luogo, colX.luogo + 2, rigaY + 5);
+            doc.text(assignment.conduttore, colX.conduttore + 2, rigaY + 5);
+        });
+        
+        // DOPO aver disegnato tutte le righe, disegna i riquadri rossi
+        // Salva la posizione Y dopo le righe
+        const yDopoRighe = y + (assignmentsByDate.length * 8);
+        
+        // Raggruppa le righe per SETTIMANA SOLARE (dal lunedì alla domenica)
+        const settimane = [];
+        let settimanaCorrente = [];
+        let dataInizioSettimanaCorrente = null;
+        
+        for (let i = 0; i < assignmentsByDate.length; i++) {
+            const dataAssegnazione = assignmentsByDate[i];
+            const dataNum = dataAssegnazione.dataNum;
+            
+            // Crea un oggetto data per questo giorno
+            const dataObj = new Date(year, monthIndex, dataNum);
+            
+            // Calcola il lunedì di questa settimana
+            const giornoSettimana = dataObj.getDay(); // 0=domenica, 1=lunedì, ...
+            let lunediOffset;
+            if (giornoSettimana === 0) {
+                lunediOffset = 6; // domenica -> lunedì è 6 giorni prima
+            } else {
+                lunediOffset = giornoSettimana - 1; // lunedì=1 -> offset 0
+            }
+            
+            const lunediTimestamp = dataObj.getTime() - (lunediOffset * 24 * 60 * 60 * 1000);
+            const lunediData = new Date(lunediTimestamp);
+            const chiaveSettimana = lunediData.toISOString().split('T')[0]; // YYYY-MM-DD del lunedì
+            
+            if (dataInizioSettimanaCorrente === null) {
+                // Prima riga, inizia una nuova settimana
+                dataInizioSettimanaCorrente = chiaveSettimana;
+                settimanaCorrente.push(i);
+            } else if (chiaveSettimana === dataInizioSettimanaCorrente) {
+                // Stessa settimana, aggiungi alla settimana corrente
+                settimanaCorrente.push(i);
+            } else {
+                // Settimana diversa, chiudi la settimana corrente e inizia una nuova
+                if (settimanaCorrente.length > 0) {
+                    settimane.push([...settimanaCorrente]);
                 }
-                
-                const mese = meseSelect.options[meseSelect.selectedIndex].text;
-                const anno = annoSelect.value;
-                const monthIndex = parseInt(meseSelect.value);
-                const year = parseInt(anno);
-                
-                console.log(`Generazione PDF Servizio di Campo per ${mese} ${anno}`);
-                
-                // Raccogli i dati dal pannello PDF
-                const cittaInput = document.getElementById('pdf-citta');
-                const luogoInput = document.getElementById('pdf-luogo');
-                
-                const citta = cittaInput ? cittaInput.value : 'SAN CATALDO CASALE';
-                const luogoDefault = luogoInput ? luogoInput.value : 'Sala del Regno via Scifo';
-                
-                // Verifica jsPDF
-                if (typeof window.jspdf === 'undefined') {
-                    alert("Errore: Libreria jsPDF non caricata. Verifica la connessione internet.");
-                    return;
-                }
-                
-                const { jsPDF } = window.jspdf;
-                
-                // Crea un nuovo documento PDF
-                const doc = new jsPDF({
-                    orientation: 'portrait',
-                    unit: 'mm',
-                    format: 'a4'
-                });
-                
-                console.log("Documento PDF creato");
-                
-                const pageWidth = doc.internal.pageSize.getWidth();
-                const margin = 15;
-                const contentWidth = pageWidth - (margin * 2);
-                
-                let y = margin;
-                
-                // Funzione per disegnare un rettangolo con bordo
-                function drawRect(x, y, w, h, fillColor, border = true, borderColor = '#000000') {
-                    doc.setFillColor(fillColor);
-                    if (border) {
-                        doc.setDrawColor(borderColor);
-                        doc.setLineWidth(0.2);
-                    } else {
-                        doc.setDrawColor(fillColor);
-                    }
-                    doc.roundedRect(x, y, w, h, 0, 0, 'FD');
-                }
-                
-                // Colori
-                const coloreBlu = '#2B5291';
-                const coloreBluScuro = '#2D5293';
-                const coloreGiallo = '#FFBF00';
-                const coloreGrigio = '#7D7D7D';
-                const coloreRosso = '#C00000';
-                const coloreGrigioChiaro = '#BEBEBE';
-                
-                // Altezza striscia
-                const altezzaStriscia = 8;
-                
-                // Intestazione Blu - TESTO BIANCO centrato
-                drawRect(margin, y, contentWidth, altezzaStriscia, coloreBlu);
-                doc.setTextColor(255, 255, 255);
-                doc.setFontSize(18);
-                doc.setFont('helvetica', 'bold');
-                doc.text('ADUNANZE PER IL SERVIZIO DI CAMPO', pageWidth / 2, y + (altezzaStriscia / 2) + 2, { align: 'center' });
-                y += altezzaStriscia + 16.7;
-                
-                // Città Gialla - TESTO NERO centrato
-                drawRect(margin, y, contentWidth, altezzaStriscia, coloreGiallo);
-                doc.setTextColor(0, 0, 0);
-                doc.setFontSize(18);
-                doc.setFont('helvetica', 'bold');
-                doc.text(citta, pageWidth / 2, y + (altezzaStriscia / 2) + 2, { align: 'center' });
-                y += altezzaStriscia + 11.2;
-                
-                // Mese Grigio - TESTO BIANCO centrato
-                drawRect(margin, y, contentWidth, altezzaStriscia, coloreGrigio);
-                doc.setTextColor(255, 255, 255);
-                doc.setFontSize(18);
-                doc.setFont('helvetica', 'bold');
-                doc.text(`${mese.toUpperCase()} ${anno}`, pageWidth / 2, y + (altezzaStriscia / 2) + 2, { align: 'center' });
-                y += altezzaStriscia + 11.7;        
-                
-                // Raccogli tutte le assegnazioni del servizio di campo per il mese selezionato
-                const assignmentsByDate = [];
-                
-                if (appState && appState.field && appState.field.assignments) {
-                    Object.entries(appState.field.assignments).forEach(([date, assignment]) => {
-                        const [y, m, d] = date.split('-').map(Number);
-                        if (y === year && m === monthIndex + 1) {
-                            const dateObj = new Date(y, m - 1, d);
-                            const dayNames = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
-                            const dayName = dayNames[dateObj.getDay()];
-                            
-                            // Cerca la configurazione del giorno per ottenere l'orario e il luogo
-                            const dayConfig = appState.field.days.find(day => {
-                                const dayDate = new Date(year, monthIndex, d);
-                                const configDayName = weekDays[dayDate.getDay() === 0 ? 6 : dayDate.getDay() - 1];
-                                return day.day === configDayName && day.enabled;
-                            });
-                            
-                            const orario = dayConfig ? dayConfig.time : '09:00';
-                            const luogo = dayConfig ? dayConfig.location : luogoDefault;
-                            
-                            assignmentsByDate.push({
-                                data: `${dayName} ${d} ${mese.toLowerCase()} ${anno}`,
-                                dataNum: d,
-                                giorno: dayName,
-                                orario: orario,
-                                luogo: luogo,
-                                conduttore: assignment.conductor || ''
-                            });
-                        }
-                    });
-                }
-                
-                // Ordina per data
-                assignmentsByDate.sort((a, b) => a.dataNum - b.dataNum);
-                
-                console.log(`Assegnazioni trovate per ${mese}:`, assignmentsByDate.length);
-                
-                // Se non ci sono assegnazioni, usa i dati dell'immagine come esempio
-                if (assignmentsByDate.length === 0) {
-                    console.log("Nessuna assegnazione trovata, uso dati esempio");
-                    const giorniEsempio = [
-                        { giorno: 'sabato', data: 3, cond: 'Orlando Kevin' },
-                        { giorno: 'martedì', data: 6, cond: 'Bruccoleri Giuseppe' },
-                        { giorno: 'mercoledì', data: 7, cond: 'Graci Arturo' },
-                        { giorno: 'sabato', data: 10, cond: 'Spagnolo Cataldo' },
-                        { giorno: 'martedì', data: 13, cond: 'La China Lucio' },
-                        { giorno: 'mercoledì', data: 14, cond: 'Graci Lorenzo' },
-                        { giorno: 'sabato', data: 17, cond: 'Orlando Kevin' },
-                        { giorno: 'martedì', data: 20, cond: 'Mangione Ruben' },
-                        { giorno: 'mercoledì', data: 21, cond: 'Bruccoleri Giuseppe' },
-                        { giorno: 'sabato', data: 24, cond: 'Calascibetta Giuseppe' },
-                        { giorno: 'martedì', data: 27, cond: 'Pulci Emanuel' },
-                        { giorno: 'mercoledì', data: 28, cond: 'LA China Lucio' }
-                    ];
-                    
-                    giorniEsempio.forEach(g => {
-                        assignmentsByDate.push({
-                            data: `${g.giorno} ${g.data} ${mese.toLowerCase()} ${anno}`,
-                            dataNum: g.data,
-                            giorno: g.giorno,
-                            orario: g.giorno === 'martedì' ? '18:00' : '9:30',
-                            luogo: 'Sala del Regno via Scifo',
-                            conduttore: g.cond
-                        });
-                    });
-                }
-                
-                // Larghezze delle colonne
-                const larghezzaData = 50;
-                const larghezzaOra = 25;
-                const larghezzaLuogo = 55;
-                const larghezzaConduttore = contentWidth - (larghezzaData + larghezzaOra + larghezzaLuogo);
-                
-                const colX = {
-                    data: margin,
-                    ora: margin + larghezzaData,
-                    luogo: margin + larghezzaData + larghezzaOra,
-                    conduttore: margin + larghezzaData + larghezzaOra + larghezzaLuogo
-                };
-                
-                // Intestazione colonne - SFONDO ROSSO SENZA BORDO (allargato di 0,1mm per lato)
-                const offsetLarghezza = 0.1;
-                doc.setFillColor(coloreRosso);
-                doc.roundedRect(margin - offsetLarghezza, y, contentWidth + (offsetLarghezza * 2), 8, 0, 0, 'F');
-                
-                // Testo intestazioni - BIANCO, MAIUSCOLO, ARIAL BOLD
-                doc.setTextColor(255, 255, 255);
-                doc.setFontSize(10);
-                doc.setFont('helvetica', 'bold');
-                
-                // Centratura del testo nelle colonne con gli spostamenti richiesti
-                doc.text('DATA', colX.data + (larghezzaData / 2), y + 5, { align: 'center' });
-                doc.text('ORA', colX.ora + (larghezzaOra / 2) - 6.7, y + 5, { align: 'center' });
-                doc.text('LUOGO', colX.luogo + (larghezzaLuogo / 2) - 15.1, y + 5, { align: 'center' });
-                doc.text('CONDUTTORE', colX.conduttore + (larghezzaConduttore / 2) - 10.6, y + 5, { align: 'center' });
-                
-                y += 8;
-                
-                // Righe dati
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(10);
-                doc.setTextColor(0, 0, 0);
-                
-                assignmentsByDate.forEach((assignment, index) => {
-                    const rigaY = y + (index * 8);
-                    
-                    doc.text(assignment.data, colX.data + 2, rigaY + 5);
-                    doc.text(assignment.orario, colX.ora + 2, rigaY + 5);
-                    doc.text(assignment.luogo, colX.luogo + 2, rigaY + 5);
-                    doc.text(assignment.conduttore, colX.conduttore + 2, rigaY + 5);
-                });
-                
-                // Identifica i gruppi di giorni per settimana (martedì, mercoledì, sabato)
-                const settimane = [];
-                let inizioSettimana = null;
-                
-                for (let i = 0; i < assignmentsByDate.length; i++) {
-                    const giorno = assignmentsByDate[i].giorno;
-                    const isGiornoSettimana = (giorno === 'martedì' || giorno === 'mercoledì' || giorno === 'sabato');
-                    
-                    if (isGiornoSettimana) {
-                        if (inizioSettimana === null) {
-                            inizioSettimana = i;
-                        }
-                        
-                        if (giorno === 'sabato' || i === assignmentsByDate.length - 1) {
-                            settimane.push({
-                                inizio: inizioSettimana,
-                                fine: i
-                            });
-                            inizioSettimana = null;
-                        }
-                    } else {
-                        if (inizioSettimana !== null) {
-                            settimane.push({
-                                inizio: inizioSettimana,
-                                fine: i - 1
-                            });
-                            inizioSettimana = null;
-                        }
-                    }
-                }
-                
-                console.log("Settimane trovate:", settimane);
-                
-                // Disegna i riquadri rossi attorno a ogni settimana
-                settimane.forEach(settimana => {
-                    const yInizio = y + (settimana.inizio * 8) - 1;
-                    const yFine = y + ((settimana.fine + 1) * 8) - 1;
-                    const altezzaGruppo = yFine - yInizio;
-                    
-                    doc.setDrawColor(coloreRosso);
-                    doc.setLineWidth(0.3);
-                    doc.rect(margin, yInizio, contentWidth, altezzaGruppo);
-                });
-                
-                y += assignmentsByDate.length * 8 + 15;
-                
-                // STRISCIA BLU PER IL TITOLO ISTRUZIONI
-                const altezzaStrisciaIstruzioni = 8;
-                doc.setFillColor(coloreBluScuro);
-                doc.roundedRect(margin, y, contentWidth, altezzaStrisciaIstruzioni, 0, 0, 'F');
-                
-                doc.setTextColor(255, 255, 255);
-                doc.setFontSize(12);
-                doc.setFont('helvetica', 'bold');
-                doc.text('PRESTA ATTENZIONE ALLE SEGUENTI INFORMAZIONI / ISTRUZIONI', pageWidth / 2, y + (altezzaStrisciaIstruzioni / 2) + 2, { align: 'center' });
-                
-                y += altezzaStrisciaIstruzioni;
-                
-                // RIQUADRO GRIGIO PER IL TESTO ISTRUZIONI
-                const testoIstruzioni = `Se il fratello assegnato per condurre l'adunanza per il servizio di campo non può essere presente dovrà trovare chi lo sostituisce. Tra i fratelli incaricati per condurre queste adunanze che sono: Avanzato Luca, Bruccoleri Giuseppe, La China Lucio, Mangione Ruben, Orlando Kevin, Pulci Emanuel, LA China Lucio, Graci Arturo, Graci Lorenzo, Calascibetta Giuseppe, Macaluso Ottavio, Spagnolo Cataldo, Spinello Giancarlo, Graci Arturo. (1 Corinti 14:40).`;
-                
-                doc.setFont('helvetica', 'normal');
-                doc.setFontSize(9);
-                const righeIstruzioni = doc.splitTextToSize(testoIstruzioni, contentWidth - 4);
-                const altezzaTesto = righeIstruzioni.length * 4 + 6;
-                
-                doc.setFillColor(coloreGrigioChiaro);
-                doc.roundedRect(margin, y, contentWidth, altezzaTesto, 0, 0, 'F');
-                
-                doc.setTextColor(0, 0, 0);
-                doc.text(righeIstruzioni, margin + 2, y + 5);
-                
-                doc.save(`Adunanze_Servizio_Campo_${mese}_${anno}.pdf`);
-                
-                alert(`✅ PDF Servizio di Campo generato con successo per ${mese} ${anno}!`);
-                
-            } catch (error) {
-                console.error("❌ ERRORE nella generazione PDF:", error);
-                alert("❌ Errore nella generazione del PDF: " + error.message);
+                settimanaCorrente = [i];
+                dataInizioSettimanaCorrente = chiaveSettimana;
             }
         }
+        
+        // Aggiungi l'ultima settimana
+        if (settimanaCorrente.length > 0) {
+            settimane.push([...settimanaCorrente]);
+        }
+        
+        console.log("Settimane trovate (raggruppate per settimana solare):");
+        settimane.forEach((settimana, idx) => {
+            const giorni = settimana.map(i => {
+                const item = assignmentsByDate[i];
+                return `${item.giorno} ${item.dataNum} ore ${item.orario}`;
+            });
+            console.log(`  Settimana ${idx + 1}: ${giorni.join(', ')}`);
+        });
+        
+        // Disegna i riquadri rossi attorno a ogni settimana
+        settimane.forEach(settimana => {
+            const primoIndice = settimana[0];
+            const ultimoIndice = settimana[settimana.length - 1];
+            
+            // Calcola le coordinate Y corrette usando la posizione iniziale y
+            const yInizioRigaPrima = y + (primoIndice * 8);
+            const yFineRigaUltima = y + ((ultimoIndice + 1) * 8);
+            
+            // Aggiungi un piccolo margine per il riquadro
+            const yInizioRiquadro = yInizioRigaPrima - 2;
+            const yFineRiquadro = yFineRigaUltima + 1;
+            const altezzaGruppo = yFineRiquadro - yInizioRiquadro;
+            
+            doc.setDrawColor(coloreRosso);
+            doc.setLineWidth(0.5);
+            doc.rect(margin, yInizioRiquadro, contentWidth, altezzaGruppo);
+        });
+        
+        // Aggiorna y dopo le righe e i riquadri
+        y = yDopoRighe + 15;
+        
+        // STRISCIA BLU PER IL TITOLO ISTRUZIONI
+        const altezzaStrisciaIstruzioni = 8;
+        doc.setFillColor(coloreBluScuro);
+        doc.roundedRect(margin, y, contentWidth, altezzaStrisciaIstruzioni, 0, 0, 'F');
+        
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('PRESTA ATTENZIONE ALLE SEGUENTI INFORMAZIONI / ISTRUZIONI', pageWidth / 2, y + (altezzaStrisciaIstruzioni / 2) + 2, { align: 'center' });
+        
+        y += altezzaStrisciaIstruzioni;
+        
+        // RIQUADRO GRIGIO PER IL TESTO ISTRUZIONI
+        const testoIstruzioni = `Se il fratello assegnato per condurre l'adunanza per il servizio di campo non può essere presente dovrà trovare chi lo sostituisce. (1 Corinti 14:40).`;
+        
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        const righeIstruzioni = doc.splitTextToSize(testoIstruzioni, contentWidth - 4);
+        const altezzaTesto = righeIstruzioni.length * 4 + 6;
+        
+        doc.setFillColor(coloreGrigioChiaro);
+        doc.roundedRect(margin, y, contentWidth, altezzaTesto, 0, 0, 'F');
+        
+        doc.setTextColor(0, 0, 0);
+        doc.text(righeIstruzioni, margin + 2, y + 5);
+        
+        doc.save(`Adunanze_Servizio_Campo_${mese}_${anno}.pdf`);
+        
+        alert(`✅ PDF Servizio di Campo generato con successo per ${mese} ${anno}!`);
+        
+    } catch (error) {
+        console.error("❌ ERRORE nella generazione PDF:", error);
+        alert("❌ Errore nella generazione del PDF: " + error.message);
+    }
+}
 
 // Funzione per generare PDF dell'Opera Pubblica
 function generaPDFOperaPubblica() {
@@ -3741,96 +3834,127 @@ function generaPDFOperaPubblica() {
 
         // Funzioni di assegnazione automatica (da programmi adunanze 4.html)
 function autoAssignField() {
-    console.log("Assegnazione automatica Servizio di Campo iniziata");
+    console.log("🚀 Assegnazione automatica Servizio di Campo iniziata");
     
     const month = parseInt(document.getElementById('field-month').value);
     const year = parseInt(document.getElementById('field-year').value);
     
-    const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     
     let assignments = { ...appState.field.assignments };
     let assignmentsCount = 0;
     
-    // Raccogliamo tutti i giorni del mese che hanno configurazione attiva, RAGGRUPPATI PER GIORNO DELLA SETTIMANA
-    const giorniPerTipo = {};
+    // 🔥 Cancella le assegnazioni del mese corrente (NUOVA LOGICA con ORARIO)
+    Object.keys(assignments).forEach(key => {
+        const parts = key.split('_'); // es: 2026-03-14_09:30
+        const datePart = parts[0];
+        const [y, m, d] = datePart.split('-').map(Number);
+        
+        if (y === year && m === month + 1) {
+            delete assignments[key];
+        }
+    });
     
-    for (let d = 1; d <= lastDay.getDate(); d++) {
-        const date = new Date(year, month, d);
-        const dayName = weekDays[date.getDay() === 0 ? 6 : date.getDay() - 1];
-        
-        // CERCA SOLO I GIORNI ATTIVI nella configurazione
-        const dayConfig = appState.field.days.find(day => day.day === dayName && day.enabled === true);
-        
-        if (dayConfig) {
-            const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-            
-            if (!giorniPerTipo[dayName]) {
-                giorniPerTipo[dayName] = [];
-            }
-            
-            giorniPerTipo[dayName].push({
-                dateStr: dateStr,
-                dayConfig: dayConfig,
-                dayName: dayName,
-                d: d
-            });
+    // Raccogli TUTTE le configurazioni attive
+    const activeConfigs = [];
+    for (let i = 0; i < appState.field.days.length; i++) {
+        const day = appState.field.days[i];
+        if (day.enabled === true) {
+            activeConfigs.push(day);
         }
     }
     
-    // Per OGNI TIPO DI GIORNO (es. tutti i Lunedì, tutti i Mercoledì, ecc.)
-    Object.keys(giorniPerTipo).forEach(dayName => {
-        const giorniDiQuestoTipo = giorniPerTipo[dayName];
-        const dayConfig = giorniDiQuestoTipo[0].dayConfig; // La configurazione è la stessa per tutti i giorni di questo tipo
+    console.log(`📋 Configurazioni attive: ${activeConfigs.length}`);
+    activeConfigs.forEach(c => console.log(`   - ${c.day} ore ${c.time} (ID: ${c.id}) - Conduttori: ${c.conductors.length}`));
+    
+    // Per OGNI configurazione separatamente
+    for (let idx = 0; idx < activeConfigs.length; idx++) {
+        const dayConfig = activeConfigs[idx];
+        const targetDayName = dayConfig.day;
+        const giorniPerQuestaConfig = [];
+        
+        // Trova tutti i giorni del mese per quel giorno della settimana
+        for (let d = 1; d <= lastDay.getDate(); d++) {
+            const date = new Date(year, month, d);
+            let dayName = '';
+            const dayIndex = date.getDay();
+            
+            if (dayIndex === 0) dayName = 'Domenica';
+            else if (dayIndex === 1) dayName = 'Lunedì';
+            else if (dayIndex === 2) dayName = 'Martedì';
+            else if (dayIndex === 3) dayName = 'Mercoledì';
+            else if (dayIndex === 4) dayName = 'Giovedì';
+            else if (dayIndex === 5) dayName = 'Venerdì';
+            else if (dayIndex === 6) dayName = 'Sabato';
+            
+            if (dayName === targetDayName) {
+                const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                
+                giorniPerQuestaConfig.push({
+                    dateStr: dateStr,
+                    dayConfig: dayConfig,
+                    dayName: dayName,
+                    d: d,
+                    time: dayConfig.time,
+                    configId: dayConfig.id
+                });
+            }
+        }
+        
+        console.log(`\n📅 ${dayConfig.day} ore ${dayConfig.time} (ID: ${dayConfig.id})`);
+        console.log(`   Giorni trovati: ${giorniPerQuestaConfig.length}`);
+        console.log(`   Conduttori: ${dayConfig.conductors.length}`);
+        
         const conductorsForDay = dayConfig.conductors || [];
         
-        if (conductorsForDay.length > 0) {
-            // TENIAMO TRACCIA DI QUANDO OGNI CONDUTTORE È STATO ASSEGNATO NEL MESE
+        if (conductorsForDay.length > 0 && giorniPerQuestaConfig.length > 0) {
             const assegnazioniNelMese = {};
             
-            // Per ogni giorno di questo tipo, assegna i conduttori in modo ciclico
-            giorniDiQuestoTipo.forEach((giorno, index) => {
-                // Ordina TUTTI i conduttori in base alla loro data di ultima conduzione
-                // MA dando priorità a chi non è stato ancora assegnato questo mese
+            // Ordina i giorni cronologicamente
+            giorniPerQuestaConfig.sort((a, b) => a.d - b.d);
+            
+            for (let g = 0; g < giorniPerQuestaConfig.length; g++) {
+                const giorno = giorniPerQuestaConfig[g];
+                
+                // Ordina i conduttori per priorità
                 const sortedConductors = [...conductorsForDay].sort((a, b) => {
-                    // Chi non è stato ancora assegnato questo mese ha priorità
                     const assegnatoA = assegnazioniNelMese[a] || false;
                     const assegnatoB = assegnazioniNelMese[b] || false;
                     
                     if (!assegnatoA && assegnatoB) return -1;
                     if (assegnatoA && !assegnatoB) return 1;
                     
-                    // Se entrambi sono già stati assegnati o entrambi non lo sono,
-                    // ordina per data ultima conduzione (più vecchia prima)
                     const dateA = dayConfig.lastConducted[a] || 0;
                     const dateB = dayConfig.lastConducted[b] || 0;
                     
                     if (dateA === 0 && dateB > 0) return -1;
                     if (dateA > 0 && dateB === 0) return 1;
-                    
                     return dateA - dateB;
                 });
                 
-                // Prendi il primo dalla lista ordinata
-                const conductor = sortedConductors[0];
-                
-                // Assegna al giorno corrente
-                assignments[giorno.dateStr] = {
-                    dayId: dayConfig.id,
-                    conductor: conductor
-                };
-                
-                // Aggiorna lastConducted per questo conduttore
-                const dataAssegnazione = new Date(giorno.dateStr).getTime();
-                dayConfig.lastConducted[conductor] = dataAssegnazione;
-                
-                // Segna che questo conduttore è stato assegnato questo mese
-                assegnazioniNelMese[conductor] = true;
-                
-                assignmentsCount++;
-            });
+                if (sortedConductors.length > 0) {
+                    const conductor = sortedConductors[0];
+                    
+                    // 🔥 CHIAVE UNICA = DATA + ORARIO
+                    const key = `${giorno.dateStr}_${dayConfig.time}`;
+                    
+                    assignments[key] = {
+                        date: giorno.dateStr,
+                        time: dayConfig.time,
+                        dayId: dayConfig.id,
+                        conductor: conductor
+                    };
+                    
+                    const dataAssegnazione = new Date(giorno.dateStr).getTime();
+                    dayConfig.lastConducted[conductor] = dataAssegnazione;
+                    assegnazioniNelMese[conductor] = true;
+                    assignmentsCount++;
+                    
+                    console.log(`   ✅ Assegnato ${conductor} per ${giorno.dayName} ${giorno.d} ${monthNames[month]} ore ${dayConfig.time}`);
+                }
+            }
         }
-    });
+    }
     
     appState.field.assignments = assignments;
     
@@ -3838,7 +3962,7 @@ function autoAssignField() {
     renderFieldCalendar();
     saveConfiguration();
     
-    alert(`✅ Assegnazione automatica completata per ${monthNames[month]} ${year}!\n${assignmentsCount} giorni processati con rotazione equa.`);
+    alert(`✅ Assegnazione automatica completata per ${monthNames[month]} ${year}!\n${assignmentsCount} assegnazioni create.`);
 }
 
 function autoAssignPublic() {
@@ -3958,8 +4082,8 @@ function autoAssignPublic() {
 }
 
         // Funzioni di assegnazione (da programmi adunanze 4.html)
-function assignFieldConductor(date, dayId, conductor) {
-    console.log("Assegnazione campo:", date, dayId, conductor);
+function assignFieldConductor(date, dayId, conductor, time) {
+    console.log("Assegnazione campo:", date, dayId, conductor, time);
     
     const dayConfig = appState.field.days.find(d => d.id === dayId);
     
@@ -3968,36 +4092,35 @@ function assignFieldConductor(date, dayId, conductor) {
         return;
     }
     
-    // Ottieni il giorno della settimana dalla data
-    const dateObj = new Date(date);
-    const dayIndex = dateObj.getDay();
-    const dayMap = {0: 'Domenica', 1: 'Lunedì', 2: 'Martedì', 3: 'Mercoledì',
-                    4: 'Giovedì', 5: 'Venerdì', 6: 'Sabato'};
-    const giornoDellaSettimana = dayMap[dayIndex];
+    // 🔥 CHIAVE UNICA = DATA + ORARIO
+    const key = `${date}_${time}`;
     
     // Se c'era un conduttore precedentemente assegnato
-    const oldConductor = appState.field.assignments[date]?.conductor;
+    const oldConductor = appState.field.assignments[key]?.conductor;
     
     if (conductor) {
         // Salva la nuova assegnazione
-        appState.field.assignments[date] = {
+        appState.field.assignments[key] = {
+            date: date,
+            time: time,
             dayId: dayId,
             conductor: conductor
         };
         
-        // Se stiamo cambiando conduttore, aggiorna le date
+        // Log cambio conduttore
         if (oldConductor && oldConductor !== conductor) {
             console.log(`Cambio conduttore: ${oldConductor} -> ${conductor}`);
         }
+        
     } else {
-        // Rimozione dell'assegnazione
-        delete appState.field.assignments[date];
+        // Rimozione assegnazione SOLO per quell’orario
+        delete appState.field.assignments[key];
     }
     
-    // Dopo qualsiasi modifica, aggiorna tutte le date di ultima conduzione
+    // Aggiorna tutte le date ultima conduzione
     aggiornaDateUltimaConduzioneField();
     
-    // Salva e aggiorna
+    // Salva e aggiorna UI
     saveConfiguration();
     renderFieldCalendar();
     renderFieldDays();
@@ -4007,7 +4130,7 @@ function svuotaProgrammaMeseField() {
     const year = parseInt(document.getElementById('field-year').value);
     const monthName = monthNames[month];
     
-    // Conta quanti giorni hanno assegnazioni nel mese corrente
+    // Raccogli tutte le date del mese corrente che hanno assegnazioni
     const giorniNelMese = [];
     Object.keys(appState.field.assignments).forEach(date => {
         const [y, m, d] = date.split('-').map(Number);
@@ -4028,16 +4151,21 @@ function svuotaProgrammaMeseField() {
             delete appState.field.assignments[date];
         });
         
-        // Aggiorna le date di ultima conduzione in base alle assegnazioni rimanenti
+        // Salva la configurazione
+        saveConfiguration();
+        
+        // Ricalcola le date di ultima conduzione
         aggiornaDateUltimaConduzioneField();
         
-        saveConfiguration();
+        // FORZA IL RIDISEGNO DEL CALENDARIO
+        // Ora sarà vuoto perché non ci sono più assegnazioni per questo mese
         renderFieldCalendar();
         renderFieldDays();
         
         alert(`✅ Programma di ${monthName} ${year} svuotato con successo!\nEliminati ${giorniNelMese.length} giorni.`);
     }
 }
+
 function assignPublicConductor(date, position, conductor, dayId) {
     console.log("Assegnazione Opera Pubblica:", date, position, conductor, dayId);
     
