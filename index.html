@@ -1550,33 +1550,37 @@ function trovaUltimaDataDaStorico(conduttore, giornoDellaSettimana) {
     return storico[storico.length - 1];
 }
 
-// Funzione per trovare l'ultima data in cui un conduttore ha effettivamente condotto in un determinato giorno della settimana
-function trovaUltimaConduzionePerGiorno(conduttore, giornoDellaSettimana) {
+// Funzione per trovare l'ultima data in cui un conduttore ha condotto in UNO SPECIFICO GIORNO DELLA SETTIMANA
+function trovaUltimaConduzionePerGiorno(conduttore, giornoDellaSettimana, orario) {
     let ultimaData = null;
     let dataTrovata = false;
     
-    console.log(`🔍 Cerco ultima conduzione per ${conduttore} il ${giornoDellaSettimana}`);
+    console.log(`🔍 Cerco ultima conduzione per ${conduttore} il ${giornoDellaSettimana} ore ${orario}`);
     
     // Cerca in tutte le assegnazioni del servizio di campo
-    Object.entries(appState.field.assignments).forEach(([data, assignment]) => {
+    Object.entries(appState.field.assignments).forEach(([key, assignment]) => {
+        // Estrai data e orario dalla chiave (formato: "YYYY-MM-DD_HH:MM")
+        const [datePart, timePart] = key.split('_');
+        if (!datePart || !timePart) return; // Salta se formato non valido
+        
+        const [year, month, day] = datePart.split('-').map(Number);
+        
         if (assignment.conductor === conduttore) {
-            // Estrai la data
-            const [year, month, day] = data.split('-').map(Number);
             const dataObj = new Date(year, month - 1, day);
             
             // Determina il giorno della settimana di questa assegnazione
-            const dayIndex = dataObj.getDay(); // 0 = domenica, 1 = lunedì, ...
+            const dayIndex = dataObj.getDay();
             const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
             const giornoAssegnazione = dayNames[dayIndex];
             
-            // Confronta con il giorno che ci interessa
-            if (giornoAssegnazione === giornoDellaSettimana) {
+            // CONFRONTA SIA GIORNO CHE ORARIO
+            if (giornoAssegnazione === giornoDellaSettimana && timePart === orario) {
                 const dataAssegnazione = dataObj.getTime();
                 
                 if (!ultimaData || dataAssegnazione > ultimaData) {
                     ultimaData = dataAssegnazione;
                     dataTrovata = true;
-                    console.log(`  → Trovata assegnazione il ${data} (${giornoAssegnazione})`);
+                    console.log(`  → Trovata assegnazione il ${datePart} ore ${timePart}`);
                 }
             }
         }
@@ -1584,11 +1588,11 @@ function trovaUltimaConduzionePerGiorno(conduttore, giornoDellaSettimana) {
     
     if (dataTrovata) {
         const dataFormattata = new Date(ultimaData).toLocaleDateString('it-IT');
-        console.log(`✅ Ultima conduzione per ${conduttore} il ${giornoDellaSettimana}: ${dataFormattata}`);
+        console.log(`✅ Ultima conduzione per ${conduttore} il ${giornoDellaSettimana} ore ${orario}: ${dataFormattata}`);
         return ultimaData;
     }
     
-    console.log(`ℹ️ Nessuna conduzione trovata per ${conduttore} il ${giornoDellaSettimana}`);
+    console.log(`ℹ️ Nessuna conduzione trovata per ${conduttore} il ${giornoDellaSettimana} ore ${orario}`);
     return null;
 }
 // Funzione per trovare l'ultima data in cui un conduttore ha effettivamente condotto in un determinato giorno della settimana (Opera Pubblica)
@@ -1915,32 +1919,42 @@ function aggiornaDateUltimaConduzionePublic() {
 function aggiornaDateUltimaConduzioneField() {
     console.log("🔄 Aggiornamento date ultima conduzione Servizio di Campo...");
     
-    // Per ogni giorno configurato nel servizio di campo
     appState.field.days.forEach(dayConfig => {
-        // Per ogni conduttore disponibile per questo giorno
+        const giorno = dayConfig.day;
+        const orario = dayConfig.time;
+        
         dayConfig.conductors.forEach(conduttore => {
-            // Trova l'ultima data in cui questo conduttore ha condotto in QUESTO giorno della settimana
-            const ultimaData = trovaUltimaConduzionePerGiorno(conduttore, dayConfig.day);
+            let ultimaData = null;
+            
+            Object.entries(appState.field.assignments).forEach(([key, assignment]) => {
+                const [datePart, timePart] = key.split('_');
+                if (!datePart || !timePart) return;
+                const [y, m, d] = datePart.split('-').map(Number);
+                
+                if (assignment.conductor === conduttore) {
+                    const dataObj = new Date(y, m - 1, d);
+                    const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+                    const giornoAssegnazione = dayNames[dataObj.getDay()];
+                    
+                    if (giornoAssegnazione === giorno && timePart === orario) {
+                        const dataTs = dataObj.getTime();
+                        if (!ultimaData || dataTs > ultimaData) {
+                            ultimaData = dataTs;
+                        }
+                    }
+                }
+            });
             
             if (ultimaData) {
-                // Aggiorna la data nel dayConfig
                 dayConfig.lastConducted[conduttore] = ultimaData;
-                console.log(`  ✅ ${conduttore} (${dayConfig.day}): ${new Date(ultimaData).toLocaleDateString('it-IT')}`);
             } else {
-                // Se non ha mai condotto, rimuovi la data (imposta a MAI)
                 delete dayConfig.lastConducted[conduttore];
-                console.log(`  ℹ️ ${conduttore} (${dayConfig.day}): MAI`);
             }
         });
     });
     
-    // Salva la configurazione aggiornata
     saveConfiguration();
-    
-    // Ridisegna la pagina di configurazione
     renderFieldDays();
-    
-    console.log("✅ Aggiornamento Servizio di Campo completato!");
 }
 function pulisciNomiDuplicati() {
     console.log("🧹 Pulizia profonda nomi duplicati in corso...");
@@ -2686,19 +2700,14 @@ function renderFieldCalendar() {
     
     calendar.innerHTML = '';
     
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    
     if (!appState.field.assignments) appState.field.assignments = {};
     
-    // 🔥 NUOVA LOGICA: legge chiavi con formato DATA_ORA
     const assignmentsDelMese = [];
     
     Object.keys(appState.field.assignments).forEach(key => {
-        const parts = key.split('_'); // es: 2026-03-15_09:30
+        const parts = key.split('_');
         const datePart = parts[0];
         const timePart = parts[1];
-        
         const [y, m, d] = datePart.split('-').map(Number);
         
         if (y === year && m === month + 1) {
@@ -2712,17 +2721,14 @@ function renderFieldCalendar() {
         }
     });
     
-    // 🔥 Ordina per giorno + orario
     assignmentsDelMese.sort((a, b) => {
         if (a.day !== b.day) return a.day - b.day;
         return a.time.localeCompare(b.time);
     });
     
-    // Mostra solo le assegnazioni che passano il filtro
     const filteredAssignments = assignmentsDelMese.filter(item => shouldShowFieldAssignment(item));
     
     if (filteredAssignments.length === 0 && assignmentsDelMese.length > 0 && fieldFilterEnabled) {
-        // Mostra un messaggio quando il filtro è attivo ma non ci sono risultati
         const emptyMessage = document.createElement('div');
         emptyMessage.style.textAlign = 'center';
         emptyMessage.style.padding = '40px';
@@ -2734,16 +2740,13 @@ function renderFieldCalendar() {
             <p>Clicca su "Tutti i giorni" per vedere tutte le adunanze.</p>
         `;
         calendar.appendChild(emptyMessage);
-        console.log(`✅ Mostrate 0 assegnazioni (filtrate) per ${monthNames[month]} ${year}`);
         return;
     }
     
-    // Mostra tutte le assegnazioni filtrate
     filteredAssignments.forEach(item => {
         const d = item.day;
         const dateStr = item.dateStr;
         const time = item.time;
-        const key = item.key;
         const assignment = item.assignment;
         
         const assignedConductor = assignment ? assignment.conductor : '';
@@ -2751,31 +2754,24 @@ function renderFieldCalendar() {
         
         const dayConfig = appState.field.days.find(day => day.id === savedDayId);
         
-        if (!dayConfig) {
-            console.warn(`Configurazione non trovata per ID: ${savedDayId}`);
-            return;
-        }
-        
-        const date = new Date(year, month, d);
-        const dayName = weekDays[date.getDay() === 0 ? 6 : date.getDay() - 1];
-        
-        const dayCard = document.createElement('div');
-        dayCard.className = 'calendar-day';
+        if (!dayConfig) return;
         
         const conductorsForDay = dayConfig.conductors || [];
         
-        // Ordina conduttori per priorità
         const sortedConductors = [...conductorsForDay].sort((a, b) => {
-            const dateA = dayConfig.lastConducted[a] || 0;
-            const dateB = dayConfig.lastConducted[b] || 0;
+            const dateA = dayConfig.lastConducted[a];
+            const dateB = dayConfig.lastConducted[b];
+            const hasA = dateA != null && dateA > 0;
+            const hasB = dateB != null && dateB > 0;
             
-            if (dateA === 0 && dateB > 0) return -1;
-            if (dateA > 0 && dateB === 0) return 1;
-            return dateA - dateB;
+            if (!hasA && hasB) return -1;
+            if (hasA && !hasB) return 1;
+            if (hasA && hasB) return dateA - dateB;
+            return a.localeCompare(b);
         });
         
-        // Opzioni select
         let optionsHtml = '<option value="">Seleziona conduttore</option>';
+        
         sortedConductors.forEach(person => {
             const lastDate = dayConfig.lastConducted[person];
             let dateText = 'MAI';
@@ -2783,37 +2779,22 @@ function renderFieldCalendar() {
             
             if (lastDate && lastDate > 0) {
                 dateText = formatDate(lastDate);
-                const assignmentDate = new Date(lastDate);
-                const now = new Date();
-                const diffTime = now - assignmentDate;
-                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                
-                if (diffDays >= 0) {
-                    if (diffDays === 0) daysAgo = ' (oggi)';
-                    else if (diffDays === 1) daysAgo = ' (ieri)';
-                    else if (diffDays > 1) daysAgo = ` (${diffDays} giorni fa)`;
-                }
+                const diffDays = Math.floor((Date.now() - lastDate) / (1000 * 60 * 60 * 24));
+                if (diffDays === 0) daysAgo = ' (oggi)';
+                else if (diffDays === 1) daysAgo = ' (ieri)';
+                else if (diffDays > 1) daysAgo = ` (${diffDays} giorni fa)`;
             }
             
             const selected = assignedConductor === person ? 'selected' : '';
-            const priorityClass = !lastDate ? 'priority-high' : 'priority-medium';
-            const prioritySymbol = !lastDate ? '🔴' : '🟡';
+            const prioritySymbol = (!lastDate || lastDate === 0) ? '🔴' : '🟡';
             
-            optionsHtml += `<option value="${person}" ${selected} class="${priorityClass}">
+            optionsHtml += `<option value="${person}" ${selected}>
                 ${prioritySymbol} ${person} - Ultima: ${dateText}${daysAgo}
             </option>`;
         });
         
-        // Info ultima conduzione
-        let lastConductedInfo = '';
-        if (assignedConductor && dayConfig.lastConducted[assignedConductor]) {
-            const lastDate = dayConfig.lastConducted[assignedConductor];
-            const formattedDate = formatDate(lastDate);
-            const daysAgo = Math.floor((Date.now() - lastDate) / (1000 * 60 * 60 * 24));
-            lastConductedInfo = `<div class="last-conducted">
-                <strong>Ultima conduzione di ${assignedConductor}:</strong> ${formattedDate} (${daysAgo} giorni fa)
-            </div>`;
-        }
+        const dayCard = document.createElement('div');
+        dayCard.className = 'calendar-day';
         
         dayCard.innerHTML = `
             <div class="calendar-day-header">
@@ -2829,27 +2810,32 @@ function renderFieldCalendar() {
                 <p><i>👥</i> ${conductorsForDay.length} conduttori disponibili</p>
             </div>
             
-            <select class="conductor-select" onchange="assignFieldConductor('${dateStr}', '${dayConfig.id}', this.value, '${time}')">
+            <select class="conductor-select" data-date="${dateStr}" data-dayid="${dayConfig.id}" data-time="${time}">
                 ${optionsHtml}
             </select>
             
-            ${lastConductedInfo}
             <div class="last-conducted" style="margin-top: 5px; background: #e8e8ff;">
-                <strong>Assegnato per questo orario:</strong> ${assignedConductor}
+                <strong>Assegnato per questo orario:</strong> ${assignedConductor || 'Nessuno'}
             </div>
         `;
         
         calendar.appendChild(dayCard);
         
-        setTimeout(() => {
-            const select = dayCard.querySelector('.conductor-select');
-            if (select && assignedConductor) {
-                select.value = assignedConductor;
-            }
-        }, 0);
+        const select = dayCard.querySelector('.conductor-select');
+        if (select && assignedConductor) {
+            select.value = assignedConductor;
+        }
+        
+        select.addEventListener('change', function(e) {
+            const newConductor = this.value;
+            const date = this.getAttribute('data-date');
+            const dayId = this.getAttribute('data-dayid');
+            const timeParam = this.getAttribute('data-time');
+            assignFieldConductor(date, dayId, newConductor, timeParam);
+        });
     });
     
-    console.log(`✅ Mostrate ${filteredAssignments.length} assegnazioni per ${monthNames[month]} ${year}${fieldFilterEnabled ? ' (filtrate)' : ''}`);
+    console.log(`✅ Mostrate ${filteredAssignments.length} assegnazioni per ${monthNames[month]} ${year}`);
 }
 
 function renderPublicCalendar() {
@@ -4029,7 +4015,7 @@ function generaPDFOperaPubblica() {
 
         // Funzioni di assegnazione automatica (da programmi adunanze 4.html)
 function autoAssignField() {
-    console.log("🚀 Assegnazione automatica Servizio di Campo iniziata");
+    console.log("🚀 Assegnazione automatica Servizio di Campo con distribuzione equilibrata");
     
     const month = parseInt(document.getElementById('field-month').value);
     const year = parseInt(document.getElementById('field-year').value);
@@ -4039,9 +4025,9 @@ function autoAssignField() {
     let assignments = { ...appState.field.assignments };
     let assignmentsCount = 0;
     
-    // 🔥 Cancella le assegnazioni del mese corrente (NUOVA LOGICA con ORARIO)
+    // 🔥 Cancella le assegnazioni del mese corrente
     Object.keys(assignments).forEach(key => {
-        const parts = key.split('_'); // es: 2026-03-14_09:30
+        const parts = key.split('_');
         const datePart = parts[0];
         const [y, m, d] = datePart.split('-').map(Number);
         
@@ -4098,66 +4084,93 @@ function autoAssignField() {
         
         console.log(`\n📅 ${dayConfig.day} ore ${dayConfig.time} (ID: ${dayConfig.id})`);
         console.log(`   Giorni trovati: ${giorniPerQuestaConfig.length}`);
-        console.log(`   Conduttori: ${dayConfig.conductors.length}`);
         
         const conductorsForDay = dayConfig.conductors || [];
         
         if (conductorsForDay.length > 0 && giorniPerQuestaConfig.length > 0) {
-            const assegnazioniNelMese = {};
+            // 🔥 NUOVA LOGICA: Calcola il numero ideale di turni per ogni conduttore
+            const numGiorni = giorniPerQuestaConfig.length;
+            const numConduttori = conductorsForDay.length;
+            const turniPerConduttore = Math.floor(numGiorni / numConduttori);
+            const resto = numGiorni % numConduttori;
+            
+            console.log(`   Conduttori: ${numConduttori}, Giorni: ${numGiorni}`);
+            console.log(`   Turni base per conduttore: ${turniPerConduttore}, Resto: ${resto} conduttori faranno 1 turno extra`);
+            
+            // Crea un array con i conduttori ripetuti in modo equilibrato
+            // Prima ordina per priorità (data più antica) per decidere chi riceve i turni extra
+            const sortedConductors = [...conductorsForDay].sort((a, b) => {
+                const dateA = dayConfig.lastConducted[a] || 0;
+                const dateB = dayConfig.lastConducted[b] || 0;
+                
+                if (dateA === 0 && dateB > 0) return -1;
+                if (dateA > 0 && dateB === 0) return 1;
+                return dateA - dateB;
+            });
+            
+            // Crea una lista di conduttori ripetuti per il numero di turni da assegnare
+            const distribuzioneTurni = [];
+            
+            // Assegna i turni base a tutti
+            for (let i = 0; i < numConduttori; i++) {
+                for (let j = 0; j < turniPerConduttore; j++) {
+                    distribuzioneTurni.push(sortedConductors[i]);
+                }
+            }
+            
+            // Assegna i turni extra ai primi 'resto' conduttori (quelli con priorità più alta)
+            for (let i = 0; i < resto; i++) {
+                distribuzioneTurni.push(sortedConductors[i]);
+            }
+            
+            console.log(`   Distribuzione turni:`, distribuzioneTurni);
+            
+            // Mescola l'ordine dei turni per evitare che gli stessi conduttori
+            // si alternino sempre nello stesso ordine (algoritmo Fisher-Yates)
+            for (let i = distribuzioneTurni.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [distribuzioneTurni[i], distribuzioneTurni[j]] = [distribuzioneTurni[j], distribuzioneTurni[i]];
+            }
+            
+            console.log(`   Distribuzione mescolata:`, distribuzioneTurni);
             
             // Ordina i giorni cronologicamente
             giorniPerQuestaConfig.sort((a, b) => a.d - b.d);
             
+            // Assegna i conduttori ai giorni
             for (let g = 0; g < giorniPerQuestaConfig.length; g++) {
                 const giorno = giorniPerQuestaConfig[g];
+                const conductor = distribuzioneTurni[g % distribuzioneTurni.length];
                 
-                // Ordina i conduttori per priorità
-                const sortedConductors = [...conductorsForDay].sort((a, b) => {
-                    const assegnatoA = assegnazioniNelMese[a] || false;
-                    const assegnatoB = assegnazioniNelMese[b] || false;
-                    
-                    if (!assegnatoA && assegnatoB) return -1;
-                    if (assegnatoA && !assegnatoB) return 1;
-                    
-                    const dateA = dayConfig.lastConducted[a] || 0;
-                    const dateB = dayConfig.lastConducted[b] || 0;
-                    
-                    if (dateA === 0 && dateB > 0) return -1;
-                    if (dateA > 0 && dateB === 0) return 1;
-                    return dateA - dateB;
-                });
+                // 🔥 CHIAVE UNICA = DATA + ORARIO
+                const key = `${giorno.dateStr}_${dayConfig.time}`;
                 
-                if (sortedConductors.length > 0) {
-                    const conductor = sortedConductors[0];
-                    
-                    // 🔥 CHIAVE UNICA = DATA + ORARIO
-                    const key = `${giorno.dateStr}_${dayConfig.time}`;
-                    
-                    assignments[key] = {
-                        date: giorno.dateStr,
-                        time: dayConfig.time,
-                        dayId: dayConfig.id,
-                        conductor: conductor
-                    };
-                    
-                    const dataAssegnazione = new Date(giorno.dateStr).getTime();
-                    dayConfig.lastConducted[conductor] = dataAssegnazione;
-                    assegnazioniNelMese[conductor] = true;
-                    assignmentsCount++;
-                    
-                    console.log(`   ✅ Assegnato ${conductor} per ${giorno.dayName} ${giorno.d} ${monthNames[month]} ore ${dayConfig.time}`);
-                }
+                assignments[key] = {
+                    date: giorno.dateStr,
+                    time: dayConfig.time,
+                    dayId: dayConfig.id,
+                    conductor: conductor
+                };
+                
+                const dataAssegnazione = new Date(giorno.dateStr).getTime();
+                dayConfig.lastConducted[conductor] = dataAssegnazione;
+                assignmentsCount++;
+                
+                console.log(`   ✅ Assegnato ${conductor} per ${giorno.dayName} ${giorno.d} ${monthNames[month]} ore ${dayConfig.time}`);
             }
         }
     }
     
     appState.field.assignments = assignments;
     
+    // Aggiorna tutte le date ultima conduzione
+    aggiornaDateUltimaConduzioneField();
+    
     renderFieldDays();
     renderFieldCalendar();
     saveConfiguration();
     
-    alert(`✅ Assegnazione automatica completata per ${monthNames[month]} ${year}!\n${assignmentsCount} assegnazioni create.`);
+    alert(`✅ Assegnazione automatica completata per ${monthNames[month]} ${year}!\n${assignmentsCount} assegnazioni create con distribuzione equilibrata.`);
 }
 
 function autoAssignPublic() {
@@ -4278,44 +4291,98 @@ function autoAssignPublic() {
 
         // Funzioni di assegnazione (da programmi adunanze 4.html)
 function assignFieldConductor(date, dayId, conductor, time) {
-    console.log("Assegnazione campo:", date, dayId, conductor, time);
+    console.log("=== ASSEGNAZIONE CAMPO ===");
+    console.log("Data:", date);
+    console.log("Nuovo conduttore:", conductor);
+    console.log("Orario ricevuto:", time);
+    
+    let orarioEffettivo = time;
+    if (!orarioEffettivo || orarioEffettivo === 'undefined') {
+        const dayConfig = appState.field.days.find(d => d.id === dayId);
+        if (dayConfig) {
+            orarioEffettivo = dayConfig.time;
+        } else {
+            orarioEffettivo = "09:00";
+        }
+    }
     
     const dayConfig = appState.field.days.find(d => d.id === dayId);
-    
     if (!dayConfig) {
         console.error('Giorno non trovato:', dayId);
         return;
     }
     
-    // 🔥 CHIAVE UNICA = DATA + ORARIO
-    const key = `${date}_${time}`;
-    
-    // Se c'era un conduttore precedentemente assegnato
+    const key = `${date}_${orarioEffettivo}`;
     const oldConductor = appState.field.assignments[key]?.conductor;
+    const dataAssegnazione = new Date(date).getTime();
     
-    if (conductor) {
-        // Salva la nuova assegnazione
+    if (conductor && conductor !== "") {
         appState.field.assignments[key] = {
             date: date,
-            time: time,
+            time: orarioEffettivo,
             dayId: dayId,
             conductor: conductor
         };
         
-        // Log cambio conduttore
-        if (oldConductor && oldConductor !== conductor) {
-            console.log(`Cambio conduttore: ${oldConductor} -> ${conductor}`);
-        }
+        dayConfig.lastConducted[conductor] = dataAssegnazione;
         
-    } else {
-        // Rimozione assegnazione SOLO per quell’orario
+        if (oldConductor && oldConductor !== conductor) {
+            let ultimaDataVecchio = null;
+            Object.entries(appState.field.assignments).forEach(([k, a]) => {
+                const [datePart, timePart] = k.split('_');
+                if (!datePart || !timePart) return;
+                const [y, m, d] = datePart.split('-').map(Number);
+                
+                if (a.conductor === oldConductor) {
+                    const dataObj = new Date(y, m - 1, d);
+                    const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+                    const giornoAssegnazione = dayNames[dataObj.getDay()];
+                    
+                    if (giornoAssegnazione === dayConfig.day && timePart === orarioEffettivo) {
+                        const dataTs = dataObj.getTime();
+                        if (!ultimaDataVecchio || dataTs > ultimaDataVecchio) {
+                            ultimaDataVecchio = dataTs;
+                        }
+                    }
+                }
+            });
+            
+            if (ultimaDataVecchio) {
+                dayConfig.lastConducted[oldConductor] = ultimaDataVecchio;
+            } else {
+                delete dayConfig.lastConducted[oldConductor];
+            }
+        }
+    } else if (oldConductor) {
         delete appState.field.assignments[key];
+        
+        let ultimaDataVecchio = null;
+        Object.entries(appState.field.assignments).forEach(([k, a]) => {
+            const [datePart, timePart] = k.split('_');
+            if (!datePart || !timePart) return;
+            const [y, m, d] = datePart.split('-').map(Number);
+            
+            if (a.conductor === oldConductor) {
+                const dataObj = new Date(y, m - 1, d);
+                const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+                const giornoAssegnazione = dayNames[dataObj.getDay()];
+                
+                if (giornoAssegnazione === dayConfig.day && timePart === orarioEffettivo) {
+                    const dataTs = dataObj.getTime();
+                    if (!ultimaDataVecchio || dataTs > ultimaDataVecchio) {
+                        ultimaDataVecchio = dataTs;
+                    }
+                }
+            }
+        });
+        
+        if (ultimaDataVecchio) {
+            dayConfig.lastConducted[oldConductor] = ultimaDataVecchio;
+        } else {
+            delete dayConfig.lastConducted[oldConductor];
+        }
     }
     
-    // Aggiorna tutte le date ultima conduzione
-    aggiornaDateUltimaConduzioneField();
-    
-    // Salva e aggiorna UI
     saveConfiguration();
     renderFieldCalendar();
     renderFieldDays();
