@@ -835,7 +835,6 @@
                 </h2>
                 <div class="flex">
                     <button class="btn btn-success" onclick="autoAssignField()">⚡ Assegna Automaticamente</button>
-                    <button class="btn btn-warning" onclick="saveMonthlyProgram('field')">💾 Salva Programma Mese (JSON)</button>
                     <button class="btn" style="background: #2B5291;" onclick="generaPDFServizioCampo()">📥 GENERA PDF SERVIZIO DI CAMPO</button>
 <button class="btn btn-danger" style="background: #dc3545;" onclick="svuotaProgrammaMeseField()">🧹 Svuota Programma Corrente</button>
                 </div>
@@ -889,8 +888,7 @@
                 </h2>
                 <div class="flex">
                     <button class="btn btn-success" onclick="autoAssignPublic()">⚡ Assegna Automaticamente (2 conduttori)</button>
-                    <button class="btn btn-warning" onclick="saveMonthlyProgram('public')">💾 Salva Programma Mese (JSON)</button>
-                    <button class="btn" style="background: #2B5291;" onclick="generaPDFOperaPubblica()">📥 GENERA PDF OPERA PUBBLICA</button>
+                   <button class="btn" style="background: #2B5291;" onclick="generaPDFOperaPubblica()">📥 GENERA PDF OPERA PUBBLICA</button>
                     <button class="btn btn-danger" onclick="eliminaTuttiGiorniVuotiPublic()">🗑️ Elimina Giorni Vuoti</button>
  <button class="btn btn-danger" style="background: #dc3545;" onclick="svuotaProgrammaMesePublic()">🧹 Svuota Programma Corrente</button>
                 </div>
@@ -3228,75 +3226,7 @@ function svuotaProgrammaMesePublic() {
         alert(`✅ Programma di ${monthName} ${year} svuotato con successo!\nEliminati ${giorniNelMese.length} giorni.`);
     }
 }
-       // Funzione per salvare il programma mensile in JSON
-        function saveMonthlyProgram(type) {
-            const month = parseInt(document.getElementById(type + '-month').value);
-            const year = parseInt(document.getElementById(type + '-year').value);
-            const monthName = monthNames[month];
-            
-            const data = {
-                type: type === 'field' ? 'Servizio di Campo' : 'Opera Pubblica',
-                month: monthName,
-                year: year,
-                savedAt: new Date().toLocaleString('it-IT'),
-                assignments: [],
-                conductors: type === 'field' ? appState.field.days : appState.public.days
-            };
-            
-            const assignments = type === 'field' ? appState.field.assignments : appState.public.assignments;
-            
-            Object.entries(assignments).forEach(([date, assignment]) => {
-                const [y, m, d] = date.split('-');
-                if (parseInt(y) === year && parseInt(m) === month + 1) {
-                    const dayConfig = (type === 'field' ? appState.field.days : appState.public.days)
-                        .find(d => d.id === assignment.dayId);
-                    
-                    if (type === 'field') {
-                        data.assignments.push({
-                            date: `${d}/${month+1}/${year}`,
-                            dayName: dayConfig ? dayConfig.day : '',
-                            time: dayConfig ? dayConfig.time : '',
-                            location: dayConfig ? dayConfig.location : '',
-                            conductor: assignment.conductor,
-                            lastConductedDate: dayConfig ? formatDate(dayConfig.lastConducted[assignment.conductor]) : 'mai'
-                        });
-                    } else {
-                        data.assignments.push({
-                            date: `${d}/${month+1}/${year}`,
-                            dayName: dayConfig ? dayConfig.day : '',
-                            time: dayConfig ? dayConfig.time : '',
-                            location: dayConfig ? dayConfig.location : '',
-                            conductor1: assignment.conductor1 || '',
-                            conductor2: assignment.conductor2 || '',
-                            conductor3: assignment.conductor3 || '',
-                            lastConducted1: assignment.conductor1 ? formatDate(dayConfig.lastConducted[assignment.conductor1]) : 'mai',
-                            lastConducted2: assignment.conductor2 ? formatDate(dayConfig.lastConducted[assignment.conductor2]) : 'mai',
-                            lastConducted3: assignment.conductor3 ? formatDate(dayConfig.lastConducted[assignment.conductor3]) : 'mai'
-                        });
-                    }
-                }
-            });
-            
-            data.assignments.sort((a, b) => {
-                const [d1, m1, y1] = a.date.split('/');
-                const [d2, m2, y2] = b.date.split('/');
-                return new Date(y1, m1-1, d1) - new Date(y2, m2-1, d2);
-            });
-            
-            const jsonStr = JSON.stringify(data, null, 2);
-            const blob = new Blob([jsonStr], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `programma_${type}_${monthName}_${year}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            alert(`✅ Programma di ${data.type} per ${monthName} ${year} salvato con successo!\n${data.assignments.length} appuntamenti salvati.`);
-        }
+
 function esportaDati() {
     const datiDaEsportare = {
         appState: appState,
@@ -4653,7 +4583,6 @@ function enableSwipe(enable) {
     swipeEnabled = enable;
 }
         // Rendi le funzioni globali
-        window.saveMonthlyProgram = saveMonthlyProgram;
         window.generaPDFServizioCampo = generaPDFServizioCampo;
         window.generaPDFOperaPubblica = generaPDFOperaPubblica;
         window.autoAssignField = autoAssignField;
