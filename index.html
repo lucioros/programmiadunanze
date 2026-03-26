@@ -695,6 +695,107 @@
                 gap: 5px;
             }
         }
+/* Stile per l'interruttore di blocco */
+.lock-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: #f8f9fa;
+    padding: 8px 15px;
+    border-radius: 40px;
+    border: 1px solid #e0e0e0;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.lock-switch:hover {
+    background: #e9ecef;
+}
+
+.lock-switch.locked {
+    background: #fff3cd;
+    border-color: #ffc107;
+}
+
+.lock-switch .lock-icon {
+    font-size: 18px;
+}
+
+.lock-switch .lock-text {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.lock-switch.locked .lock-text {
+    color: #856404;
+}
+
+.lock-switch.unlocked .lock-text {
+    color: #28a745;
+}
+
+/* Stile per elementi disabilitati */
+.disabled-element {
+    opacity: 0.6;
+    pointer-events: none;
+    filter: grayscale(0.1);
+}
+
+.disabled-select, 
+.disabled-select select,
+.disabled-select input,
+.disabled-select button {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.blurred {
+    filter: blur(2px);
+    pointer-events: none;
+    user-select: none;
+}
+
+.lock-overlay {
+    position: relative;
+}
+
+.lock-overlay::after {
+    content: "🔒 MODIFICA DISABILITATA";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 30px;
+    font-size: 14px;
+    font-weight: bold;
+    z-index: 1000;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.lock-message {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #ffc107;
+    color: #856404;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: bold;
+    z-index: 9999;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    animation: fadeOut 3s ease-in-out forwards;
+}
+
+@keyframes fadeOut {
+    0% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { opacity: 0; visibility: hidden; }
+}
     </style>
 </head>
 <body>
@@ -839,6 +940,13 @@
 <button class="btn btn-danger" style="background: #dc3545;" onclick="svuotaProgrammaMeseField()">🧹 Svuota Programma Corrente</button>
                 </div>
             </div>
+  <!-- INTERRUTTORE DI BLOCCO -->
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 15px;">
+        <div id="field-lock-switch" class="lock-switch unlocked" onclick="toggleFieldLock()">
+            <span class="lock-icon">🔓</span>
+            <span class="lock-text">Modifica Abilitata</span>
+        </div>
+    </div>
  <!-- FILTRO SEMPLIFICATO GIORNI/ORARI -->
     <div class="filter-panel" style="background: #f0f0f0; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
@@ -893,7 +1001,13 @@
  <button class="btn btn-danger" style="background: #dc3545;" onclick="svuotaProgrammaMesePublic()">🧹 Svuota Programma Corrente</button>
                 </div>
             </div>
-
+<!-- INTERRUTTORE DI BLOCCO -->
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 15px;">
+        <div id="public-lock-switch" class="lock-switch unlocked" onclick="togglePublicLock()">
+            <span class="lock-icon">🔓</span>
+            <span class="lock-text">Modifica Abilitata</span>
+        </div>
+    </div>
 <!-- Generatore PDF Opera Pubblica (semplificato) -->
 <div class="pdf-generator-panel">
     <h3>📄 GENERA PDF PROGRAMMA MENSILE (testo selezionabile)</h3>
@@ -1535,7 +1649,254 @@ function applyFieldFilter() {
     // Questa funzione non è più necessaria con la nuova UI, ma la manteniamo per compatibilità
     renderFieldFilterButtons();
 }
+// Variabili per tracciare lo stato di blocco per mese/anno
+let fieldLockedMonths = {};  // Formato: { "2026-3": true, "2026-4": false }
+let publicLockedMonths = {};
 
+// Funzione per ottenere la chiave del mese/anno
+function getMonthYearKey(month, year) {
+    return `${year}-${month}`;
+}
+
+// Funzione per verificare se il mese/anno del Servizio di Campo è bloccato
+function isFieldMonthLocked() {
+    const month = parseInt(document.getElementById('field-month').value);
+    const year = parseInt(document.getElementById('field-year').value);
+    const key = getMonthYearKey(month, year);
+    return fieldLockedMonths[key] === true;
+}
+
+// Funzione per verificare se il mese/anno dell'Opera Pubblica è bloccato
+function isPublicMonthLocked() {
+    const month = parseInt(document.getElementById('public-month').value);
+    const year = parseInt(document.getElementById('public-year').value);
+    const key = getMonthYearKey(month, year);
+    return publicLockedMonths[key] === true;
+}
+
+// Funzione per mostrare un messaggio temporaneo
+function showMessage(message, color) {
+    const existingMsg = document.querySelector('.lock-message');
+    if (existingMsg) existingMsg.remove();
+    
+    const msg = document.createElement('div');
+    msg.className = 'lock-message';
+    msg.textContent = message;
+    msg.style.backgroundColor = color;
+    msg.style.color = 'white';
+    document.body.appendChild(msg);
+    
+    setTimeout(() => {
+        if (msg) msg.remove();
+    }, 3000);
+}
+
+// Funzione per verificare se le modifiche sono consentite nel Servizio di Campo
+function isFieldModificationAllowed() {
+    if (isFieldMonthLocked()) {
+        const month = parseInt(document.getElementById('field-month').value);
+        const year = parseInt(document.getElementById('field-year').value);
+        showMessage(`⚠️ Modifica non consentita - Il programma di ${monthNames[month]} ${year} è bloccato`, '#dc3545');
+        return false;
+    }
+    return true;
+}
+
+// Funzione per verificare se le modifiche sono consentite nell'Opera Pubblica
+function isPublicModificationAllowed() {
+    if (isPublicMonthLocked()) {
+        const month = parseInt(document.getElementById('public-month').value);
+        const year = parseInt(document.getElementById('public-year').value);
+        showMessage(`⚠️ Modifica non consentita - Il programma di ${monthNames[month]} ${year} è bloccato`, '#dc3545');
+        return false;
+    }
+    return true;
+}
+// Funzione per bloccare/sbloccare il mese corrente del Servizio di Campo
+function toggleFieldLock() {
+    const month = parseInt(document.getElementById('field-month').value);
+    const year = parseInt(document.getElementById('field-year').value);
+    const key = getMonthYearKey(month, year);
+    const lockSwitch = document.getElementById('field-lock-switch');
+    const calendar = document.getElementById('field-calendar');
+    const filterPanel = document.querySelector('#field-tab .filter-panel');
+    const buttons = document.querySelectorAll('#field-tab .flex .btn');
+    const selectsToDisable = document.querySelectorAll('#field-tab select:not(#field-month):not(#field-year)');
+    
+    const isCurrentlyLocked = fieldLockedMonths[key] === true;
+    
+    if (isCurrentlyLocked) {
+        // Sblocca
+        fieldLockedMonths[key] = false;
+        lockSwitch.className = 'lock-switch unlocked';
+        lockSwitch.querySelector('.lock-icon').textContent = '🔓';
+        lockSwitch.querySelector('.lock-text').textContent = 'Modifica Abilitata';
+        
+        // Rimuovi le classi di disabilitazione
+        if (calendar) calendar.classList.remove('blurred');
+        if (filterPanel) filterPanel.classList.remove('disabled-element');
+        buttons.forEach(btn => btn.classList.remove('disabled-element'));
+        selectsToDisable.forEach(select => select.classList.remove('disabled-element'));
+        
+        showMessage(`🔓 Modifica abilitata per ${monthNames[month]} ${year}`, '#28a745');
+    } else {
+        // Blocca
+        fieldLockedMonths[key] = true;
+        lockSwitch.className = 'lock-switch locked';
+        lockSwitch.querySelector('.lock-icon').textContent = '🔒';
+        lockSwitch.querySelector('.lock-text').textContent = 'Modifica Disabilitata';
+        
+        // Aggiungi classi di disabilitazione
+        if (calendar) calendar.classList.add('blurred');
+        if (filterPanel) filterPanel.classList.add('disabled-element');
+        buttons.forEach(btn => btn.classList.add('disabled-element'));
+        selectsToDisable.forEach(select => select.classList.add('disabled-element'));
+        
+        showMessage(`🔒 Modifica disabilitata per ${monthNames[month]} ${year}`, '#856404');
+    }
+    
+    saveLockState();
+}
+
+// Funzione per bloccare/sbloccare il mese corrente dell'Opera Pubblica
+function togglePublicLock() {
+    const month = parseInt(document.getElementById('public-month').value);
+    const year = parseInt(document.getElementById('public-year').value);
+    const key = getMonthYearKey(month, year);
+    const lockSwitch = document.getElementById('public-lock-switch');
+    const calendar = document.getElementById('public-calendar');
+    const pdfPanel = document.querySelector('#public-tab .pdf-generator-panel');
+    const buttons = document.querySelectorAll('#public-tab .flex .btn');
+    const selectsToDisable = document.querySelectorAll('#public-tab select:not(#public-month):not(#public-year)');
+    
+    const isCurrentlyLocked = publicLockedMonths[key] === true;
+    
+    if (isCurrentlyLocked) {
+        // Sblocca
+        publicLockedMonths[key] = false;
+        lockSwitch.className = 'lock-switch unlocked';
+        lockSwitch.querySelector('.lock-icon').textContent = '🔓';
+        lockSwitch.querySelector('.lock-text').textContent = 'Modifica Abilitata';
+        
+        // Rimuovi le classi di disabilitazione
+        if (calendar) calendar.classList.remove('blurred');
+        if (pdfPanel) pdfPanel.classList.remove('disabled-element');
+        buttons.forEach(btn => btn.classList.remove('disabled-element'));
+        selectsToDisable.forEach(select => select.classList.remove('disabled-element'));
+        
+        showMessage(`🔓 Modifica abilitata per ${monthNames[month]} ${year}`, '#28a745');
+    } else {
+        // Blocca
+        publicLockedMonths[key] = true;
+        lockSwitch.className = 'lock-switch locked';
+        lockSwitch.querySelector('.lock-icon').textContent = '🔒';
+        lockSwitch.querySelector('.lock-text').textContent = 'Modifica Disabilitata';
+        
+        // Aggiungi classi di disabilitazione
+        if (calendar) calendar.classList.add('blurred');
+        if (pdfPanel) pdfPanel.classList.add('disabled-element');
+        buttons.forEach(btn => btn.classList.add('disabled-element'));
+        selectsToDisable.forEach(select => select.classList.add('disabled-element'));
+        
+        showMessage(`🔒 Modifica disabilitata per ${monthNames[month]} ${year}`, '#856404');
+    }
+    
+    saveLockState();
+}
+// Funzione per salvare lo stato di blocco
+function saveLockState() {
+    const lockState = {
+        fieldLockedMonths: fieldLockedMonths,
+        publicLockedMonths: publicLockedMonths
+    };
+    localStorage.setItem('lockState', JSON.stringify(lockState));
+    console.log('Stato di blocco salvato:', lockState);
+}
+
+// Funzione per caricare lo stato di blocco
+function loadLockState() {
+    const saved = localStorage.getItem('lockState');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            fieldLockedMonths = parsed.fieldLockedMonths || {};
+            publicLockedMonths = parsed.publicLockedMonths || {};
+            console.log('Stato di blocco caricato:', { fieldLockedMonths, publicLockedMonths });
+        } catch (e) {
+            console.error('Errore nel caricamento dello stato di blocco:', e);
+        }
+    }
+}
+
+// Funzione per aggiornare l'interfaccia quando cambia mese/anno nel Servizio di Campo
+function updateFieldLockUI() {
+    const month = parseInt(document.getElementById('field-month').value);
+    const year = parseInt(document.getElementById('field-year').value);
+    const key = getMonthYearKey(month, year);
+    const isLocked = fieldLockedMonths[key] === true;
+    const lockSwitch = document.getElementById('field-lock-switch');
+    const calendar = document.getElementById('field-calendar');
+    const filterPanel = document.querySelector('#field-tab .filter-panel');
+    const buttons = document.querySelectorAll('#field-tab .flex .btn');
+    const selectsToDisable = document.querySelectorAll('#field-tab select:not(#field-month):not(#field-year)');
+    
+    if (!lockSwitch) return;
+    
+    if (isLocked) {
+        lockSwitch.className = 'lock-switch locked';
+        lockSwitch.querySelector('.lock-icon').textContent = '🔒';
+        lockSwitch.querySelector('.lock-text').textContent = 'Modifica Disabilitata';
+        
+        if (calendar) calendar.classList.add('blurred');
+        if (filterPanel) filterPanel.classList.add('disabled-element');
+        buttons.forEach(btn => btn.classList.add('disabled-element'));
+        selectsToDisable.forEach(select => select.classList.add('disabled-element'));
+    } else {
+        lockSwitch.className = 'lock-switch unlocked';
+        lockSwitch.querySelector('.lock-icon').textContent = '🔓';
+        lockSwitch.querySelector('.lock-text').textContent = 'Modifica Abilitata';
+        
+        if (calendar) calendar.classList.remove('blurred');
+        if (filterPanel) filterPanel.classList.remove('disabled-element');
+        buttons.forEach(btn => btn.classList.remove('disabled-element'));
+        selectsToDisable.forEach(select => select.classList.remove('disabled-element'));
+    }
+}
+
+// Funzione per aggiornare l'interfaccia quando cambia mese/anno nell'Opera Pubblica
+function updatePublicLockUI() {
+    const month = parseInt(document.getElementById('public-month').value);
+    const year = parseInt(document.getElementById('public-year').value);
+    const key = getMonthYearKey(month, year);
+    const isLocked = publicLockedMonths[key] === true;
+    const lockSwitch = document.getElementById('public-lock-switch');
+    const calendar = document.getElementById('public-calendar');
+    const pdfPanel = document.querySelector('#public-tab .pdf-generator-panel');
+    const buttons = document.querySelectorAll('#public-tab .flex .btn');
+    const selectsToDisable = document.querySelectorAll('#public-tab select:not(#public-month):not(#public-year)');
+    
+    if (!lockSwitch) return;
+    
+    if (isLocked) {
+        lockSwitch.className = 'lock-switch locked';
+        lockSwitch.querySelector('.lock-icon').textContent = '🔒';
+        lockSwitch.querySelector('.lock-text').textContent = 'Modifica Disabilitata';
+        
+        if (calendar) calendar.classList.add('blurred');
+        if (pdfPanel) pdfPanel.classList.add('disabled-element');
+        buttons.forEach(btn => btn.classList.add('disabled-element'));
+        selectsToDisable.forEach(select => select.classList.add('disabled-element'));
+    } else {
+        lockSwitch.className = 'lock-switch unlocked';
+        lockSwitch.querySelector('.lock-icon').textContent = '🔓';
+        lockSwitch.querySelector('.lock-text').textContent = 'Modifica Abilitata';
+        
+        if (calendar) calendar.classList.remove('blurred');
+        if (pdfPanel) pdfPanel.classList.remove('disabled-element');
+        buttons.forEach(btn => btn.classList.remove('disabled-element'));
+        selectsToDisable.forEach(select => select.classList.remove('disabled-element'));
+    }
+}
 function trovaUltimaDataDaStorico(conduttore, giornoDellaSettimana) {
     if (!appState.public.conductorHistory) return null;
     
@@ -1821,14 +2182,49 @@ function loadConfiguration() {
                 parsed.public.conductorHistory = {};
             }
             
-            // ... resto del codice di loadConfiguration ...
+            // Inizializza le strutture dati necessarie
+            if (!parsed.disponibilita) {
+                parsed.disponibilita = {
+                    field: [],
+                    public: []
+                };
+            }
+            
+            if (parsed.field && parsed.field.days) {
+                parsed.field.days.forEach(day => {
+                    if (!day.lastConducted) day.lastConducted = {};
+                    if (!day.conductors) day.conductors = [];
+                    if (!day.id) day.id = 'day_' + Date.now() + Math.random();
+                });
+            }
+            
+            if (parsed.public && parsed.public.days) {
+                parsed.public.days.forEach(day => {
+                    if (!day.lastConducted) day.lastConducted = {};
+                    if (!day.conductors) day.conductors = [];
+                    if (!day.id) day.id = 'day_' + Date.now() + Math.random();
+                });
+            }
+            
+            if (!parsed.field.assignments) parsed.field.assignments = {};
+            if (!parsed.public.assignments) parsed.public.assignments = {};
             
             appState = parsed;
             
             // Rigenera lo storico dalle assegnazioni esistenti se necessario
             rigeneraStoricoDaAssegnazioni();
             
-            console.log('Configurazione caricata');
+            // Aggiorna le date di ultima conduzione
+            aggiornaDateUltimaConduzioneField();
+            aggiornaDateUltimaConduzionePublic();
+            
+            // ============================================================
+            // CARICA LO STATO DI BLOCCO
+            // ============================================================
+            loadLockState();
+            // ============================================================
+            
+            console.log('Configurazione caricata e stato di blocco caricato');
         } catch (e) {
             console.error('Errore nel caricamento:', e);
         }
@@ -2453,6 +2849,7 @@ function renderFieldDays() {
 }
 
         function toggleFieldDayConductor(dayIndex, nome, isChecked) {
+	 if (!isFieldModificationAllowed()) return;
             const dayConfig = appState.field.days[dayIndex];
             
             if (isChecked) {
@@ -2608,6 +3005,7 @@ function createPublicDayCard(dayConfig, index) {
     return dayDiv;
 }
         function togglePublicDayConductor(dayIndex, nome, isChecked) {
+	if (!isPublicModificationAllowed()) return;
             const dayConfig = appState.public.days[dayIndex];
             
             if (isChecked) {
@@ -2627,6 +3025,7 @@ function createPublicDayCard(dayConfig, index) {
 
         // Funzioni di modifica per i giorni
         function addFieldDay() {
+	 if (!isFieldModificationAllowed()) return;
             const newId = 'day_' + Date.now();
             const newDay = weekDays[appState.field.days.length % 7];
             appState.field.days.push({ 
@@ -2642,6 +3041,7 @@ function createPublicDayCard(dayConfig, index) {
         }
 
         function removeFieldDay(index) {
+	if (!isFieldModificationAllowed()) return;
             if (confirm('Sei sicuro di voler rimuovere questo giorno?')) {
                 appState.field.days.splice(index, 1);
                 renderFieldDays();
@@ -2649,15 +3049,18 @@ function createPublicDayCard(dayConfig, index) {
         }
 
         function toggleFieldDay(index) {
+		 if (!isFieldModificationAllowed()) return;
             appState.field.days[index].enabled = !appState.field.days[index].enabled;
             renderFieldDays();
         }
 
         function updateFieldDay(index, field, value) {
+	  if (!isFieldModificationAllowed()) return;
             appState.field.days[index][field] = value;
         }
 
 function addPublicDay() {
+	 if (!isPublicModificationAllowed()) return;
     const newId = 'day_' + Date.now();
     const newDay = weekDays[appState.public.days.length % 7];
     appState.public.days.push({ 
@@ -2674,6 +3077,7 @@ function addPublicDay() {
 }
 
         function removePublicDay(index) {
+	 if (!isPublicModificationAllowed()) return;
             if (confirm('Sei sicuro di voler rimuovere questo giorno?')) {
                 appState.public.days.splice(index, 1);
                 renderPublicDays();
@@ -2681,11 +3085,13 @@ function addPublicDay() {
         }
 
         function togglePublicDay(index) {
+	 if (!isPublicModificationAllowed()) return;
             appState.public.days[index].enabled = !appState.public.days[index].enabled;
             renderPublicDays();
         }
 
         function updatePublicDay(index, field, value) {
+	  if (!isPublicModificationAllowed()) return;
             appState.public.days[index][field] = value;
         }
 
@@ -2824,7 +3230,14 @@ function renderFieldCalendar() {
             select.value = assignedConductor;
         }
         
+        // MODIFICA: Aggiunto controllo di blocco nell'event listener
         select.addEventListener('change', function(e) {
+            // Controlla se le modifiche sono consentite
+            if (!isFieldModificationAllowed()) {
+                // Ripristina il valore precedente
+                this.value = assignedConductor || '';
+                return;
+            }
             const newConductor = this.value;
             const date = this.getAttribute('data-date');
             const dayId = this.getAttribute('data-dayid');
@@ -2942,7 +3355,7 @@ function renderPublicCalendar() {
             const select2Id = `public2-${dateStr}`.replace(/[\.-]/g, '');
             const select3Id = `public3-${dateStr}`.replace(/[\.-]/g, '');
             
-            // Crea il contenuto HTML della card
+            // Crea il contenuto HTML della card con i controlli di blocco
             dayCard.innerHTML = `
                 <div class="calendar-day-header">
                     <h4>
@@ -2960,14 +3373,14 @@ function renderPublicCalendar() {
                 
                 <div style="margin: 10px 0; padding: 10px; background: #f0fff4; border-radius: 8px;">
                     <strong style="color: #e53e3e;">1° Conduttore (obbligatorio)</strong>
-                    <select class="conductor-select primary" id="${select1Id}" onchange="assignPublicConductor('${dateStr}', 1, this.value, '${effectiveDayConfig.id}')">
+                    <select class="conductor-select primary" id="${select1Id}" onchange="if(isPublicModificationAllowed()) assignPublicConductor('${dateStr}', 1, this.value, '${effectiveDayConfig.id}')">
                         ${getOptions([assignment.conductor2, assignment.conductor3].filter(Boolean))}
                     </select>
                 </div>
                 
                 <div style="margin: 10px 0; padding: 10px; background: #f0fff4; border-radius: 8px;">
                     <strong style="color: #48bb78;">2° Conduttore (obbligatorio)</strong>
-                    <select class="conductor-select secondary" id="${select2Id}" onchange="assignPublicConductor('${dateStr}', 2, this.value, '${effectiveDayConfig.id}')">
+                    <select class="conductor-select secondary" id="${select2Id}" onchange="if(isPublicModificationAllowed()) assignPublicConductor('${dateStr}', 2, this.value, '${effectiveDayConfig.id}')">
                         ${getOptions([assignment.conductor1, assignment.conductor3].filter(Boolean))}
                     </select>
                 </div>
@@ -2975,12 +3388,12 @@ function renderPublicCalendar() {
                 ${hasConductor3 ? 
                     `<div style="margin: 10px 0; padding: 10px; background: #fffaf0; border-radius: 8px;">
                         <strong style="color: #ed8936;">3° Conduttore (opzionale)</strong>
-                        <select class="conductor-select optional" id="${select3Id}" onchange="assignPublicConductor('${dateStr}', 3, this.value, '${effectiveDayConfig.id}')">
+                        <select class="conductor-select optional" id="${select3Id}" onchange="if(isPublicModificationAllowed()) assignPublicConductor('${dateStr}', 3, this.value, '${effectiveDayConfig.id}')">
                             ${getOptions([assignment.conductor1, assignment.conductor2].filter(Boolean))}
                         </select>
-                        <button class="remove-conductor-btn" onclick="removePublicConductor3('${dateStr}', '${effectiveDayConfig.id}')">✗ Rimuovi 3° conduttore</button>
+                        <button class="remove-conductor-btn" onclick="if(isPublicModificationAllowed()) removePublicConductor3('${dateStr}', '${effectiveDayConfig.id}')">✗ Rimuovi 3° conduttore</button>
                     </div>` :
-                    `<button class="add-conductor-btn" onclick="addPublicConductor3('${dateStr}', '${effectiveDayConfig.id}')">+ Aggiungi 3° conduttore (opzionale)</button>`
+                    `<button class="add-conductor-btn" onclick="if(isPublicModificationAllowed()) addPublicConductor3('${dateStr}', '${effectiveDayConfig.id}')">+ Aggiungi 3° conduttore (opzionale)</button>`
                 }
                 
                 <div class="last-conducted" style="margin-top: 15px;">
@@ -3009,6 +3422,7 @@ function renderPublicCalendar() {
 }
 
 function addPublicConductor3(dateStr, dayId) {
+ if (!isPublicModificationAllowed()) return;
     console.log("Aggiungi 3° conduttore per:", dateStr, dayId);
     
     // Estrai il giorno della settimana dalla data
@@ -3061,6 +3475,7 @@ function addPublicConductor3(dateStr, dayId) {
 }
 
 function removePublicConductor3(dateStr, dayId) {
+	 if (!isPublicModificationAllowed()) return;
     console.log("Rimuovi 3° conduttore per:", dateStr, dayId);
     
     // Recupera il vecchio conduttore prima di rimuoverlo
@@ -3150,6 +3565,7 @@ function eliminaGiornoCalendarioPublic(dateStr) {
 } 
 
 function eliminaTuttiGiorniVuotiPublic() {
+	if (!isPublicModificationAllowed()) return;
     const month = parseInt(document.getElementById('public-month').value);
     const year = parseInt(document.getElementById('public-year').value);
     
@@ -3180,6 +3596,7 @@ function eliminaTuttiGiorniVuotiPublic() {
     }
 }
 function svuotaProgrammaMesePublic() {
+	  if (!isPublicModificationAllowed()) return;
     const month = parseInt(document.getElementById('public-month').value);
     const year = parseInt(document.getElementById('public-year').value);
     const monthName = monthNames[month];
@@ -3945,6 +4362,7 @@ function generaPDFOperaPubblica() {
 
         // Funzioni di assegnazione automatica (da programmi adunanze 4.html)
 function autoAssignField() {
+if (!isFieldModificationAllowed()) return;
     console.log("🚀 Assegnazione automatica Servizio di Campo con distribuzione equilibrata");
     
     const month = parseInt(document.getElementById('field-month').value);
@@ -4104,6 +4522,7 @@ function autoAssignField() {
 }
 
 function autoAssignPublic() {
+	if (!isPublicModificationAllowed()) return;
     console.log("Assegnazione automatica Opera Pubblica iniziata");
     
     const month = parseInt(document.getElementById('public-month').value);
@@ -4221,6 +4640,7 @@ function autoAssignPublic() {
 
         // Funzioni di assegnazione (da programmi adunanze 4.html)
 function assignFieldConductor(date, dayId, conductor, time) {
+ if (!isFieldModificationAllowed()) return;
     console.log("=== ASSEGNAZIONE CAMPO ===");
     console.log("Data:", date);
     console.log("Nuovo conduttore:", conductor);
@@ -4318,6 +4738,7 @@ function assignFieldConductor(date, dayId, conductor, time) {
     renderFieldDays();
 }
 function svuotaProgrammaMeseField() {
+ if (!isFieldModificationAllowed()) return;
     const month = parseInt(document.getElementById('field-month').value);
     const year = parseInt(document.getElementById('field-year').value);
     const monthName = monthNames[month];
@@ -4359,6 +4780,7 @@ function svuotaProgrammaMeseField() {
 }
 
 function assignPublicConductor(date, position, conductor, dayId) {
+	  if (!isPublicModificationAllowed()) return;
     console.log("Assegnazione Opera Pubblica:", date, position, conductor, dayId);
     
     const dayConfig = appState.public.days.find(d => d.id === dayId);
@@ -4601,21 +5023,28 @@ function enableSwipe(enable) {
         renderPublicDays();
         renderDisponibilita();
 	checkSession();
+	renderFieldFilterButtons();
+	updateFieldLockUI(); 
+	updatePublicLockUI(); 
 
       // Inizializza i pulsanti del filtro
         renderFieldFilterButtons();
         
-        // Aggiungi event listener per aggiornare il filtro quando cambia mese/anno
+                // Aggiungi event listener per aggiornare il filtro e il blocco quando cambia mese/anno
         const fieldMonthSelect = document.getElementById('field-month');
         const fieldYearSelect = document.getElementById('field-year');
+        const publicMonthSelect = document.getElementById('public-month');
+        const publicYearSelect = document.getElementById('public-year');
         
+        // Event listener per il Servizio di Campo
         if (fieldMonthSelect) {
             const originalOnChange = fieldMonthSelect.getAttribute('onchange');
             if (originalOnChange) {
-                fieldMonthSelect.setAttribute('onchange', `${originalOnChange}; updateFieldFilterOptions();`);
+                fieldMonthSelect.setAttribute('onchange', `${originalOnChange}; updateFieldFilterOptions(); updateFieldLockUI();`);
             } else {
                 fieldMonthSelect.addEventListener('change', function() {
                     updateFieldFilterOptions();
+                    updateFieldLockUI();
                     renderFieldCalendar();
                 });
             }
@@ -4624,14 +5053,41 @@ function enableSwipe(enable) {
         if (fieldYearSelect) {
             const originalOnChange = fieldYearSelect.getAttribute('onchange');
             if (originalOnChange) {
-                fieldYearSelect.setAttribute('onchange', `${originalOnChange}; updateFieldFilterOptions();`);
+                fieldYearSelect.setAttribute('onchange', `${originalOnChange}; updateFieldFilterOptions(); updateFieldLockUI();`);
             } else {
                 fieldYearSelect.addEventListener('change', function() {
                     updateFieldFilterOptions();
+                    updateFieldLockUI();
                     renderFieldCalendar();
                 });
             }
         }
+        
+        // Event listener per l'Opera Pubblica
+        if (publicMonthSelect) {
+            const originalOnChange = publicMonthSelect.getAttribute('onchange');
+            if (originalOnChange) {
+                publicMonthSelect.setAttribute('onchange', `${originalOnChange}; updatePublicLockUI();`);
+            } else {
+                publicMonthSelect.addEventListener('change', function() {
+                    updatePublicLockUI();
+                    renderPublicCalendar();
+                });
+            }
+        }
+        
+        if (publicYearSelect) {
+            const originalOnChange = publicYearSelect.getAttribute('onchange');
+            if (originalOnChange) {
+                publicYearSelect.setAttribute('onchange', `${originalOnChange}; updatePublicLockUI();`);
+            } else {
+                publicYearSelect.addEventListener('change', function() {
+                    updatePublicLockUI();
+                    renderPublicCalendar();
+                });
+            }
+        }
+
     </script>
 </body>
 </html>
