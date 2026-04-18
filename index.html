@@ -1215,14 +1215,73 @@ async function logout() {
         console.error('Errore logout:', error);
     }
 }
-
-// Controlla se c'è una sessione attiva al caricamento
+// Funzione handleLogout per il pulsante nella UI
+async function handleLogout() {
+    console.log('handleLogout chiamata');
+    
+    try {
+        // Se c'è un utente loggato, effettua il logout da Supabase
+        if (currentUser) {
+            const { error } = await supabase.auth.signOut();
+            if (error) throw error;
+        }
+        
+        currentUser = null;
+        
+        // 🔥 FERMA LA SINCRONIZZAZIONE AUTOMATICA
+        stopAutoSync();
+        
+        // Ricarica i dati locali (senza dati utente)
+        resetToLocalData();
+        
+        // Ricarica i giorni speciali locali
+        loadSpecialDays();
+        
+        // Ricarica lo stato di blocco locale
+        loadLockState();
+        
+        // Aggiorna l'interfaccia utente
+        updateAuthUI();
+        
+        // Aggiorna i calendari
+        renderFieldCalendar();
+        renderPublicCalendar();
+        
+        // Mostra messaggio di conferma
+        alert('Logout effettuato con successo!');
+        
+        console.log('Logout completato, ora in modalità offline');
+        
+    } catch (error) {
+        console.error('Errore durante il logout:', error);
+        alert('Errore durante il logout: ' + error.message);
+    }
+}// Controlla se c'è una sessione attiva al caricamento
 async function checkSession() {
     const { data: { session } } = await supabase.auth.getSession();
+    
     if (session) {
         currentUser = session.user;
-        await loadUserData();
-        // AGGIUNGI QUESTA RIGA
+        console.log('📱 Sessione trovata per:', currentUser.email);
+        
+        showLoadingMessage('🔄 Sincronizzazione dati in corso...');
+        
+        try {
+            await loadUserData();
+            updateAuthUI();
+            console.log('✅ Sincronizzazione completata all\'apertura');
+        } catch (error) {
+            console.error('❌ Errore durante la sincronizzazione:', error);
+            // In caso di errore, carica comunque i dati locali
+            loadSpecialDays();
+            loadLockState();
+        } finally {
+            hideLoadingMessage();
+        }
+    } else {
+        console.log('📱 Nessuna sessione trovata, uso dati locali');
+        loadSpecialDays();
+        loadLockState();
         updateAuthUI();
     }
 }
@@ -1233,7 +1292,7 @@ async function loadUserData() {
     try {
         const { data, error } = await supabase
             .from('user_data')
-            .select('app_state, lock_state')
+            .select('app_state, lock_state, special_days') // Aggiunto special_days
             .eq('user_id', currentUser.id)
             .maybeSingle();
         
@@ -1242,11 +1301,55 @@ async function loadUserData() {
         if (data && data.app_state) {
             // I dati cloud hanno la precedenza
             appState = data.app_state;
+            
+            // Assicurati che tutte le proprietà necessarie esistano (per robustezza)
+            if (!appState.disponibilita) {
+                appState.disponibilita = { field: [], public: [] };
+            }
+            if (!appState.public.conductorHistory) {
+                appState.public.conductorHistory = {};
+            }
+            if (!appState.field.assignments) {
+                appState.field.assignments = {};
+            }
+            if (!appState.public.assignments) {
+                appState.public.assignments = {};
+            }
+            
+            // Assicurati che tutti i giorni abbiano gli ID necessari
+            if (appState.field && appState.field.days) {
+                appState.field.days.forEach(day => {
+                    if (!day.lastConducted) day.lastConducted = {};
+                    if (!day.conductors) day.conductors = [];
+                    if (!day.id) day.id = 'day_' + Date.now() + Math.random();
+                });
+            }
+            
+            if (appState.public && appState.public.days) {
+                appState.public.days.forEach(day => {
+                    if (!day.lastConducted) day.lastConducted = {};
+                    if (!day.conductors) day.conductors = [];
+                    if (!day.id) day.id = 'day_' + Date.now() + Math.random();
+                });
+            }
+            
             saveConfiguration(); // Salva in locale come cache
             console.log('Dati caricati dal cloud');
         } else {
             // Prima volta che l'utente accede: carica i dati locali nel cloud
             await uploadUserData();
+            console.log('Primo accesso - dati locali caricati nel cloud');
+        }
+        
+        // Carica i GIORNI SPECIALI dal cloud
+        if (data && data.special_days) {
+            fieldSpecialDays = data.special_days;
+            saveSpecialDays(); // Salva in locale
+            console.log('Giorni speciali caricati dal cloud:', Object.keys(fieldSpecialDays).length);
+        } else {
+            // Se non ci sono giorni speciali nel cloud, carica dal locale
+            loadSpecialDays();
+            console.log('Giorni speciali caricati dal locale');
         }
         
         // Carica lo stato di blocco dal cloud
@@ -1260,17 +1363,31 @@ async function loadUserData() {
             loadLockState();
         }
         
+        // DOPO aver caricato, rigenera lo storico e aggiorna le date
+        rigeneraStoricoDaAssegnazioni();
+        aggiornaDateUltimaConduzioneField();
+        aggiornaDateUltimaConduzionePublic();
+        
         // Aggiorna l'interfaccia
         renderFieldDays();
         renderPublicDays();
         renderDisponibilita();
+        renderFieldCalendar();
+        renderPublicCalendar();
         updateFieldLockUI();
         updatePublicLockUI();
+        updateFieldFilterOptions();
         
         updateAuthUI();
         
+        console.log('✅ Caricamento completato - appState, lockState e specialDays sincronizzati');
+        
     } catch (error) {
         console.error('Errore caricamento dati:', error);
+        // In caso di errore, prova a caricare i dati locali come fallback
+        loadSpecialDays();
+        loadLockState();
+        console.log('Fallback: caricati dati locali');
     }
 }
 
@@ -1288,6 +1405,7 @@ async function uploadUserData() {
                     fieldLockedMonths: fieldLockedMonths,
                     publicLockedMonths: publicLockedMonths
                 },
+                special_days: fieldSpecialDays, // <-- AGGIUNGI QUESTA RIGA
                 updated_at: new Date()
             }, {
                 onConflict: 'user_id'
@@ -1297,6 +1415,16 @@ async function uploadUserData() {
         console.log('Dati salvati nel cloud');
     } catch (error) {
         console.error('Errore salvataggio cloud:', error);
+    }
+}
+// Funzione che salva e sincronizza immediatamente
+async function saveAndSync() {
+    localStorage.setItem('appState', JSON.stringify(appState));
+    console.log('💾 Dati salvati in locale');
+    
+    if (currentUser) {
+        await uploadUserData();
+        console.log('☁️ Dati sincronizzati con il cloud');
     }
 }
 
@@ -1377,7 +1505,63 @@ function updateAuthUI() {
         console.log('UI aggiornata: nessun utente loggato');
     }
 }
+let autoSyncInterval = null;
 
+function startAutoSync() {
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    
+    autoSyncInterval = setInterval(async () => {
+        if (currentUser) {
+            console.log('🔄 Sincronizzazione automatica periodica...');
+            await uploadUserData();
+            console.log('✅ Sincronizzazione automatica completata');
+        }
+    }, 5 * 60 * 1000);
+}
+
+function stopAutoSync() {
+    if (autoSyncInterval) {
+        clearInterval(autoSyncInterval);
+        autoSyncInterval = null;
+    }
+}
+function showLoadingMessage(message) {
+    let loader = document.getElementById('sync-loader');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.id = 'sync-loader';
+        loader.style.cssText = 'position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:20px 40px; border-radius:10px; box-shadow:0 4px 20px rgba(0,0,0,0.2); z-index:10000; font-size:16px; font-weight:bold; color:#667eea;';
+        document.body.appendChild(loader);
+    }
+    loader.innerHTML = `<div style="display:flex; align-items:center; gap:10px;"><div class="spinner"></div>${message}</div>`;
+    loader.style.display = 'block';
+    
+    // Aggiungi stile spinner se non esiste
+    if (!document.querySelector('#spinner-style')) {
+        const style = document.createElement('style');
+        style.id = 'spinner-style';
+        style.textContent = `
+            .spinner {
+                width: 20px;
+                height: 20px;
+                border: 3px solid #e0e0e0;
+                border-top: 3px solid #667eea;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+}
+
+function hideLoadingMessage() {
+    const loader = document.getElementById('sync-loader');
+    if (loader) loader.style.display = 'none';
+}
 async function syncNow() {
     if (!currentUser) {
         alert('Devi effettuare il login prima di sincronizzare');
@@ -3189,6 +3373,10 @@ function renderFieldCalendar() {
     
     if (!appState.field.assignments) appState.field.assignments = {};
     
+    // Carica i giorni speciali
+    loadSpecialDays();
+    
+    // Raccogli le assegnazioni esistenti
     const assignmentsDelMese = [];
     
     Object.keys(appState.field.assignments).forEach(key => {
@@ -3208,14 +3396,34 @@ function renderFieldCalendar() {
         }
     });
     
-    assignmentsDelMese.sort((a, b) => {
+    // AGGIUNGI I GIORNI SPECIALI come assegnazioni temporanee
+    const specialAssignments = [];
+    Object.keys(fieldSpecialDays).forEach(dateStr => {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        if (y === year && m === month + 1) {
+            const specialDay = fieldSpecialDays[dateStr];
+            specialAssignments.push({
+                key: `special_${dateStr}`,
+                dateStr: dateStr,
+                time: specialDay.time,
+                day: d,
+                isSpecial: true,
+                specialData: specialDay,
+                assignment: appState.field.assignments[`${dateStr}_${specialDay.time}`] || { conductor: specialDay.conductor || '' }
+            });
+        }
+    });
+    
+    // Unisci e ordina
+    const allAssignments = [...assignmentsDelMese, ...specialAssignments];
+    allAssignments.sort((a, b) => {
         if (a.day !== b.day) return a.day - b.day;
         return a.time.localeCompare(b.time);
     });
     
-    const filteredAssignments = assignmentsDelMese.filter(item => shouldShowFieldAssignment(item));
+    const filteredAssignments = allAssignments.filter(item => shouldShowFieldAssignment(item));
     
-    if (filteredAssignments.length === 0 && assignmentsDelMese.length > 0 && fieldFilterEnabled) {
+    if (filteredAssignments.length === 0 && allAssignments.length > 0 && fieldFilterEnabled) {
         const emptyMessage = document.createElement('div');
         emptyMessage.style.textAlign = 'center';
         emptyMessage.style.padding = '40px';
@@ -3230,40 +3438,71 @@ function renderFieldCalendar() {
         return;
     }
     
+    // Per ogni giorno, mostra la card
     filteredAssignments.forEach(item => {
         const d = item.day;
         const dateStr = item.dateStr;
         const time = item.time;
-        const assignment = item.assignment;
+        const isSpecial = item.isSpecial || false;
+        const specialData = item.specialData;
         
-        const assignedConductor = assignment ? assignment.conductor : '';
-        const savedDayId = assignment ? assignment.dayId : null;
+        const assignedConductor = item.assignment ? item.assignment.conductor : '';
         
-        const dayConfig = appState.field.days.find(day => day.id === savedDayId);
+        // Determina il giorno della settimana
+        const dateObj = new Date(dateStr);
+        const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+        const dayName = dayNames[dateObj.getDay()];
         
-        if (!dayConfig) return;
+        let conductorsForDay = [];
+        let lastConducted = {};
+        let location = "";
         
-        const conductorsForDay = dayConfig.conductors || [];
-        
-        const sortedConductors = [...conductorsForDay].sort((a, b) => {
-            const dateA = dayConfig.lastConducted[a];
-            const dateB = dayConfig.lastConducted[b];
-            const hasA = dateA != null && dateA > 0;
-            const hasB = dateB != null && dateB > 0;
+        if (isSpecial) {
+            // Per i giorni speciali, usa i conduttori disponibili globali
+            conductorsForDay = [...(appState.disponibilita.field || [])];
+            lastConducted = {};
+            location = specialData.location;
             
-            if (!hasA && hasB) return -1;
-            if (hasA && !hasB) return 1;
-            if (hasA && hasB) return dateA - dateB;
-            return a.localeCompare(b);
+            // Aggiorna lastConducted per i conduttori da tutte le assegnazioni
+            conductorsForDay.forEach(cond => {
+                let ultimaData = null;
+                Object.entries(appState.field.assignments).forEach(([key, ass]) => {
+                    if (ass.conductor === cond) {
+                        const [datePart, timePart] = key.split('_');
+                        const [y, m, d] = datePart.split('-').map(Number);
+                        const dataTs = new Date(y, m-1, d).getTime();
+                        if (!ultimaData || dataTs > ultimaData) ultimaData = dataTs;
+                    }
+                });
+                if (ultimaData) lastConducted[cond] = ultimaData;
+            });
+        } else {
+            // Giorni normali: trova la configurazione
+            const dayConfig = appState.field.days.find(day => day.id === item.assignment?.dayId);
+            if (dayConfig) {
+                conductorsForDay = dayConfig.conductors || [];
+                lastConducted = dayConfig.lastConducted || {};
+                location = dayConfig.location;
+            } else {
+                conductorsForDay = [];
+                location = "Luogo non configurato";
+            }
+        }
+        
+        // Ordina i conduttori per priorità
+        const sortedConductors = [...conductorsForDay].sort((a, b) => {
+            const dateA = lastConducted[a] || 0;
+            const dateB = lastConducted[b] || 0;
+            if (dateA === 0 && dateB > 0) return -1;
+            if (dateA > 0 && dateB === 0) return 1;
+            return dateA - dateB;
         });
         
         let optionsHtml = '<option value="">Seleziona conduttore</option>';
-        
         sortedConductors.forEach(person => {
-            const lastDate = dayConfig.lastConducted[person];
+            const lastDate = lastConducted[person];
             let dateText = 'MAI';
             let daysAgo = '';
-            
             if (lastDate && lastDate > 0) {
                 dateText = formatDate(lastDate);
                 const diffDays = Math.floor((Date.now() - lastDate) / (1000 * 60 * 60 * 24));
@@ -3271,39 +3510,41 @@ function renderFieldCalendar() {
                 else if (diffDays === 1) daysAgo = ' (ieri)';
                 else if (diffDays > 1) daysAgo = ` (${diffDays} giorni fa)`;
             }
-            
             const selected = assignedConductor === person ? 'selected' : '';
             const prioritySymbol = (!lastDate || lastDate === 0) ? '🔴' : '🟡';
-            
-            optionsHtml += `<option value="${person}" ${selected}>
-                ${prioritySymbol} ${person} - Ultima: ${dateText}${daysAgo}
-            </option>`;
+            optionsHtml += `<option value="${person}" ${selected}>${prioritySymbol} ${person} - Ultima: ${dateText}${daysAgo}</option>`;
         });
         
         const dayCard = document.createElement('div');
         dayCard.className = 'calendar-day';
+        if (isSpecial) {
+            dayCard.style.border = '3px solid #ff9800';
+            dayCard.style.background = '#fff8e1';
+        }
         
         dayCard.innerHTML = `
             <div class="calendar-day-header">
                 <h4>
-                    <span class="day-indicator ${getDayColorClass(dayConfig.day)}">${dayConfig.day}</span>
+                    <span class="day-indicator ${getDayColorClass(dayName)}">${dayName}</span>
                     ${d} ${monthNames[month]} ${year}
+                    ${isSpecial ? '<span style="background:#ff9800; color:white; padding:2px 8px; border-radius:12px; font-size:10px; margin-left:8px;">🎉 SPECIALE</span>' : ''}
                     <span style="font-size: 11px; color: #666; margin-left: 8px;">🕐 ${time}</span>
                 </h4>
                 <span class="badge">Servizio di Campo</span>
             </div>
             <div class="calendar-day-info">
-                <p><i>📍</i> ${dayConfig.location}</p>
+                <p><i>📍</i> ${location}</p>
                 <p><i>👥</i> ${conductorsForDay.length} conduttori disponibili</p>
             </div>
             
-            <select class="conductor-select" data-date="${dateStr}" data-dayid="${dayConfig.id}" data-time="${time}">
+            <select class="conductor-select" data-date="${dateStr}" data-time="${time}" data-isspecial="${isSpecial}">
                 ${optionsHtml}
             </select>
             
             <div class="last-conducted" style="margin-top: 5px; background: #e8e8ff;">
                 <strong>Assegnato per questo orario:</strong> ${assignedConductor || 'Nessuno'}
             </div>
+            ${isSpecial ? `<button class="btn btn-danger btn-sm" style="margin-top: 10px; width: 100%;" onclick="removeSpecialDay('${dateStr}')">🗑️ Rimuovi Giorno Speciale</button>` : ''}
         `;
         
         calendar.appendChild(dayCard);
@@ -3313,25 +3554,145 @@ function renderFieldCalendar() {
             select.value = assignedConductor;
         }
         
-        // MODIFICA: Aggiunto controllo di blocco nell'event listener
         select.addEventListener('change', function(e) {
-            // Controlla se le modifiche sono consentite
             if (!isFieldModificationAllowed()) {
-                // Ripristina il valore precedente
                 this.value = assignedConductor || '';
                 return;
             }
             const newConductor = this.value;
             const date = this.getAttribute('data-date');
-            const dayId = this.getAttribute('data-dayid');
             const timeParam = this.getAttribute('data-time');
-            assignFieldConductor(date, dayId, newConductor, timeParam);
+            const isSpecialDay = this.getAttribute('data-isspecial') === 'true';
+            
+            if (isSpecialDay) {
+                // Salva l'assegnazione per il giorno speciale
+                const key = `${date}_${timeParam}`;
+                if (newConductor && newConductor !== "") {
+                    if (!appState.field.assignments) appState.field.assignments = {};
+                    appState.field.assignments[key] = {
+                        date: date,
+                        time: timeParam,
+                        dayId: 'special_' + date,
+                        conductor: newConductor
+                    };
+                    
+                    // Aggiorna lastConducted
+                    const dataAssegnazione = new Date(date).getTime();
+                    const dayConfig = appState.field.days.find(day => day.day === dayName);
+                    if (dayConfig) {
+                        dayConfig.lastConducted[newConductor] = dataAssegnazione;
+                    }
+                    
+                    // Aggiorna anche nei giorni speciali
+                    if (fieldSpecialDays[date]) {
+                        fieldSpecialDays[date].conductor = newConductor;
+                        saveSpecialDays();
+                    }
+                } else if (appState.field.assignments[key]) {
+                    delete appState.field.assignments[key];
+                    if (fieldSpecialDays[date]) {
+                        fieldSpecialDays[date].conductor = "";
+                        saveSpecialDays();
+                    }
+                }
+                saveConfiguration();
+                renderFieldCalendar();
+            } else {
+                assignFieldConductor(date, null, newConductor, timeParam);
+            }
         });
     });
     
+    // Aggiungi il pulsante "Aggiungi Giorno Speciale" se ci sono giorni nel mese senza configurazione
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const existingDays = new Set(allAssignments.map(a => a.day));
+    
+    if (existingDays.size < lastDay && isFieldModificationAllowed()) {
+        const addButtonContainer = document.createElement('div');
+        addButtonContainer.style.marginTop = '20px';
+        addButtonContainer.style.textAlign = 'center';
+        addButtonContainer.innerHTML = `
+            <button class="btn" style="background: #ff9800; color: white;" onclick="addSpecialDay()">
+                ➕ Aggiungi Giorno Speciale (Festività/Evento)
+            </button>
+            <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                Usa questa funzione per aggiungere giorni extra come festività o eventi speciali
+            </p>
+        `;
+        calendar.appendChild(addButtonContainer);
+    }
+    
     console.log(`✅ Mostrate ${filteredAssignments.length} assegnazioni per ${monthNames[month]} ${year}`);
 }
+let fieldSpecialDays = {}; // Formato: { "2026-4-25": { time: "09:00", location: "Sala del Regno (Festa)", conductor: "" } }
 
+// Funzione per caricare i giorni speciali
+function loadSpecialDays() {
+    const saved = localStorage.getItem('fieldSpecialDays');
+    if (saved) {
+        try {
+            fieldSpecialDays = JSON.parse(saved);
+        } catch(e) { console.error(e); }
+    }
+}
+// Funzione per salvare i giorni speciali
+function saveSpecialDays() {
+    localStorage.setItem('fieldSpecialDays', JSON.stringify(fieldSpecialDays));
+    if (currentUser) {
+        // Salva anche nel cloud se loggato
+        uploadUserData();
+    }
+}
+
+// Funzione per aggiungere un giorno speciale
+function addSpecialDay() {
+    if (!isFieldModificationAllowed()) return;
+    
+    const month = parseInt(document.getElementById('field-month').value);
+    const year = parseInt(document.getElementById('field-year').value);
+    
+    // Mostra un dialog per selezionare il giorno
+    const dayNum = prompt(`Inserisci il giorno del mese (1-${new Date(year, month+1, 0).getDate()}) per ${monthNames[month]} ${year}:`);
+    if (!dayNum) return;
+    
+    const day = parseInt(dayNum);
+    if (isNaN(day) || day < 1 || day > new Date(year, month+1, 0).getDate()) {
+        alert("Giorno non valido!");
+        return;
+    }
+    
+    const ora = prompt("Inserisci l'orario (es. 09:00):", "09:00");
+    if (!ora) return;
+    
+    const luogo = prompt("Inserisci il luogo:", "Sala del Regno (Giorno Speciale)");
+    if (!luogo) return;
+    
+    const dateKey = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    
+    fieldSpecialDays[dateKey] = {
+        time: ora,
+        location: luogo,
+        conductor: "",
+        isSpecial: true,
+        addedAt: new Date().toISOString()
+    };
+    
+    saveSpecialDays();
+    renderFieldCalendar();
+    alert(`✅ Giorno speciale aggiunto per ${day}/${month+1}/${year} alle ore ${ora}`);
+}
+
+// Funzione per rimuovere un giorno speciale
+function removeSpecialDay(dateStr) {
+    if (!isFieldModificationAllowed()) return;
+    
+    if (confirm(`Sei sicuro di voler rimuovere questo giorno speciale?`)) {
+        delete fieldSpecialDays[dateStr];
+        saveSpecialDays();
+        renderFieldCalendar();
+        alert("✅ Giorno speciale rimosso!");
+    }
+}
 function renderPublicCalendar() {
     const month = parseInt(document.getElementById('public-month').value);
     const year = parseInt(document.getElementById('public-year').value);
@@ -4997,14 +5358,7 @@ function showTab(tabName) {
 }
 
 async function saveConfiguration() {
-    // Salva sempre in locale (per accesso offline)
-    localStorage.setItem('appState', JSON.stringify(appState));
-    console.log('Configurazione salvata in locale');
-    
-    // Se l'utente è loggato, salva anche nel cloud
-    if (currentUser) {
-        await uploadUserData();
-    }
+    await saveAndSync();  // ← Ora usa la nuova funzione wrapper
 }
 function loadConfiguration() {
     const saved = localStorage.getItem('appState');
@@ -5117,115 +5471,92 @@ function enableSwipe(enable) {
 	window.esportaDati = esportaDati;
 	window.importaDati = importaDati;
 
-        // Inizializzazione
-                // Inizializzazione
-        initializeYears();
-        loadConfiguration();
-        
-        // Imposta il mese corrente all'avvio
-        setCurrentMonth();
-        
-        // Carica lo stato di blocco
-        loadLockState();
-        
-        renderFieldDays();
-        renderPublicDays();
-        renderDisponibilita();
-        checkSession();
+ // ============================================================
+// FUNZIONE DI INIZIALIZZAZIONE CON SINCRONIZZAZIONE
+// ============================================================
+async function initializeApp() {
+    console.log('🚀 Avvio applicazione...');
+    
+    // 1. Inizializza elementi base
+    initializeYears();
+    loadConfiguration();
+    setCurrentMonth();
+    loadLockState();
+    loadSpecialDays();  // Carica giorni speciali locali
+    
+    // 2. Renderizza interfaccia base
+    renderFieldDays();
+    renderPublicDays();
+    renderDisponibilita();
+    
+    // 3. Controlla sessione e sincronizza dal cloud
+    await checkSession();
+    
+    // 4. Renderizza calendari con dati (cloud o locali)
+    renderFieldCalendar();
+    renderPublicCalendar();
+    updateFieldLockUI();
+    updatePublicLockUI();
+    renderFieldFilterButtons();
+    debugLockState();
+    
+    // 5. Avvia sincronizzazione automatica se utente loggato
+    if (currentUser) {
+        startAutoSync();
+        console.log('🔄 Sincronizzazione automatica avviata (ogni 5 minuti)');
+    }
+    
+    console.log('✅ App inizializzata con successo');
+}
 
-        // Inizializza i pulsanti del filtro
-        renderFieldFilterButtons();
-        
-        // Aggiorna le UI di blocco
+// ============================================================
+// CHIAMATA ALL'INIZIALIZZAZIONE
+// ============================================================
+initializeApp();
+
+// ============================================================
+// EVENT LISTENER PER CAMBI MESE/ANNO
+// ============================================================
+const fieldMonthSelect = document.getElementById('field-month');
+const fieldYearSelect = document.getElementById('field-year');
+const publicMonthSelect = document.getElementById('public-month');
+const publicYearSelect = document.getElementById('public-year');
+
+// Event listener per il Servizio di Campo
+if (fieldMonthSelect) {
+    fieldMonthSelect.addEventListener('change', function() {
+        updateFieldFilterOptions();
         updateFieldLockUI();
-        updatePublicLockUI();
-        
-        // Debug: mostra lo stato di blocco caricato
-        debugLockState(); 
+        updateLastFieldMonth();
+        renderFieldCalendar();
+    });
+}
 
-      // Inizializza i pulsanti del filtro
-        renderFieldFilterButtons();
-        
-        // Aggiungi event listener per aggiornare il filtro e il blocco quando cambia mese/anno
-        const fieldMonthSelect = document.getElementById('field-month');
-        const fieldYearSelect = document.getElementById('field-year');
-        const publicMonthSelect = document.getElementById('public-month');
-        const publicYearSelect = document.getElementById('public-year');
-        
-        // Event listener per il Servizio di Campo
-        if (fieldMonthSelect) {
-            const originalOnChange = fieldMonthSelect.getAttribute('onchange');
-            if (originalOnChange) {
-                fieldMonthSelect.setAttribute('onchange', `${originalOnChange}; updateFieldFilterOptions(); updateFieldLockUI(); updateLastFieldMonth();`);
-            } else {
-                fieldMonthSelect.addEventListener('change', function() {
-                    updateFieldFilterOptions();
-                    updateFieldLockUI();
-                    updateLastFieldMonth();
-                    renderFieldCalendar();
-                });
-            }
-        }
-        
-        if (fieldYearSelect) {
-            const originalOnChange = fieldYearSelect.getAttribute('onchange');
-            if (originalOnChange) {
-                fieldYearSelect.setAttribute('onchange', `${originalOnChange}; updateFieldFilterOptions(); updateFieldLockUI(); updateLastFieldMonth();`);
-            } else {
-                fieldYearSelect.addEventListener('change', function() {
-                    updateFieldFilterOptions();
-                    updateFieldLockUI();
-                    updateLastFieldMonth();
-                    renderFieldCalendar();
-                });
-            }
-        }
-        
-        // Event listener per l'Opera Pubblica
-        if (publicMonthSelect) {
-            const originalOnChange = publicMonthSelect.getAttribute('onchange');
-            if (originalOnChange) {
-                publicMonthSelect.setAttribute('onchange', `${originalOnChange}; updatePublicLockUI(); updateLastPublicMonth();`);
-            } else {
-                publicMonthSelect.addEventListener('change', function() {
-                    updatePublicLockUI();
-                    updateLastPublicMonth();
-                    renderPublicCalendar();
-                });
-            }
-        }
-        
-        if (publicYearSelect) {
-            const originalOnChange = publicYearSelect.getAttribute('onchange');
-            if (originalOnChange) {
-                publicYearSelect.setAttribute('onchange', `${originalOnChange}; updatePublicLockUI(); updateLastPublicMonth();`);
-            } else {
-                publicYearSelect.addEventListener('change', function() {
-                    updatePublicLockUI();
-                    updateLastPublicMonth();
-                    renderPublicCalendar();
-                });
-            }
-        }
+if (fieldYearSelect) {
+    fieldYearSelect.addEventListener('change', function() {
+        updateFieldFilterOptions();
+        updateFieldLockUI();
+        updateLastFieldMonth();
+        renderFieldCalendar();
+    });
+}
+
+// Event listener per l'Opera Pubblica
+if (publicMonthSelect) {
+    publicMonthSelect.addEventListener('change', function() {
+        updatePublicLockUI();
+        updateLastPublicMonth();
+        renderPublicCalendar();
+    });
+}
+
+if (publicYearSelect) {
+    publicYearSelect.addEventListener('change', function() {
+        updatePublicLockUI();
+        updateLastPublicMonth();
+        renderPublicCalendar();
+    });
+}
     </script>
 </body>
-</html>                publicMonthSelect.setAttribute('onchange', `${originalOnChange}; updatePublicLockUI();`);
-            } else {
-                publicMonthSelect.addEventListener('change', function() {
-                    updatePublicLockUI();
-                    renderPublicCalendar();
-                });
-            }
-        }
-        
-        if (publicYearSelect) {
-            const originalOnChange = publicYearSelect.getAttribute('onchange');
-            if (originalOnChange) {
-                publicYearSelect.setAttribute('onchange', `${originalOnChange}; updatePublicLockUI();`);
-            } else {
-                publicYearSelect.addEventListener('change', function() {
-                    updatePublicLockUI();
-                    renderPublicCalendar();
-                });
-            }
-        }
+</html>
