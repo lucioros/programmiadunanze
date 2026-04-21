@@ -1258,7 +1258,9 @@ async function handleLogout() {
         console.error('Errore durante il logout:', error);
         alert('Errore durante il logout: ' + error.message);
     }
-}// Controlla se c'è una sessione attiva al caricamento
+}
+
+// Controlla se c'è una sessione attiva al caricamento
 async function checkSession() {
     const { data: { session } } = await supabase.auth.getSession();
     
@@ -1354,6 +1356,18 @@ async function loadUserData() {
             console.log('Giorni speciali caricati dal locale');
         }
         
+        // ============================================================
+        // Carica i dati della VISITA DEL SORVEGLIANTE dal cloud
+        // ============================================================
+        if (data && data.visita_circoscrizione) {
+            visitaCircoscrizione = data.visita_circoscrizione;
+            saveVisitaCircoscrizione();  // Salva in locale
+            console.log('👔 Visita sorvegliante caricata dal cloud:', visitaCircoscrizione);
+        } else {
+            loadVisitaCircoscrizione();  // Carica dal locale
+            console.log('👔 Visita sorvegliante caricata dal locale');
+        }
+        
         // Carica lo stato di blocco dal cloud
         if (data && data.lock_state) {
             fieldLockedMonths = data.lock_state.fieldLockedMonths || {};
@@ -1382,13 +1396,14 @@ async function loadUserData() {
         
         updateAuthUI();
         
-        console.log('✅ Caricamento completato - appState, lockState e specialDays sincronizzati');
+        console.log('✅ Caricamento completato - appState, lockState, specialDays e visitaCircoscrizione sincronizzati');
         
     } catch (error) {
         console.error('Errore caricamento dati:', error);
         // In caso di errore, prova a caricare i dati locali come fallback
         loadSpecialDays();
         loadLockState();
+        loadVisitaCircoscrizione();
         console.log('Fallback: caricati dati locali');
     }
 }
@@ -1407,7 +1422,8 @@ async function uploadUserData() {
                     fieldLockedMonths: fieldLockedMonths,
                     publicLockedMonths: publicLockedMonths
                 },
-                special_days: fieldSpecialDays, // <-- AGGIUNGI QUESTA RIGA
+                special_days: fieldSpecialDays,
+		visita_circoscrizione: visitaCircoscrizione,
                 updated_at: new Date()
             }, {
                 onConflict: 'user_id'
@@ -1867,6 +1883,8 @@ let visitaCircoscrizione = {
     startDate: null,  // formato "YYYY-MM-DD"
     endDate: null     // formato "YYYY-MM-DD"
 };
+// Variabili per i giorni speciali (festività/eventi)
+let fieldSpecialDays = {}; // Formato: { "2026-4-25": { time: "09:00", location: "Sala del Regno (Festa)", conductor: "" } }
 
 // Funzione per ottenere la chiave del mese/anno
 function getMonthYearKey(month, year) {
