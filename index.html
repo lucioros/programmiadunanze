@@ -907,6 +907,8 @@
                     </div>
                 </div>
             </div>
+<!-- PANNELLO CONFIGURAZIONE VISITA SORVEGLIANTE -->
+            <div id="visita-config-container"></div>
             <div class="text-center mt-4" style="display: flex; gap: 10px; justify-content: center;">
     <button class="btn" onclick="saveConfiguration()">💾 Salva Configurazione</button>
     <button class="btn btn-warning" onclick="aggiornaDateUltimaConduzionePublic()">🔄 Aggiorna Date Ultima Conduzione</button>
@@ -1859,6 +1861,12 @@ function applyFieldFilter() {
 // Variabili per tracciare lo stato di blocco per mese/anno
 let fieldLockedMonths = {};  // Formato: { "2026-3": true, "2026-4": false }
 let publicLockedMonths = {};
+// Variabili per la visita del Sorvegliante di Circoscrizione
+let visitaCircoscrizione = {
+    enabled: false,
+    startDate: null,  // formato "YYYY-MM-DD"
+    endDate: null     // formato "YYYY-MM-DD"
+};
 
 // Funzione per ottenere la chiave del mese/anno
 function getMonthYearKey(month, year) {
@@ -2045,6 +2053,156 @@ function debugLockState() {
         console.log('localStorage lockState:', JSON.parse(saved));
     } else {
         console.log('Nessun lockState in localStorage');
+    }
+}
+// ============================================================
+// FUNZIONI PER GESTIONE VISITA SORVEGLIANTE DI CIRCOSCRIZIONE
+// ============================================================
+
+// Carica i dati della visita
+function loadVisitaCircoscrizione() {
+    const saved = localStorage.getItem('visitaCircoscrizione');
+    if (saved) {
+        try {
+            visitaCircoscrizione = JSON.parse(saved);
+            console.log('✅ Dati visita caricati:', visitaCircoscrizione);
+        } catch(e) {
+            console.error('Errore caricamento visita:', e);
+        }
+    }
+}
+
+// Salva i dati della visita
+function saveVisitaCircoscrizione() {
+    localStorage.setItem('visitaCircoscrizione', JSON.stringify(visitaCircoscrizione));
+    console.log('💾 Dati visita salvati');
+    
+    if (currentUser) {
+        uploadUserData();
+    }
+}
+
+// Verifica se una data rientra nel periodo della visita
+function isDateInVisitaPeriod(dateStr) {
+    if (!visitaCircoscrizione.enabled) return false;
+    if (!visitaCircoscrizione.startDate || !visitaCircoscrizione.endDate) return false;
+    
+    const checkDate = new Date(dateStr);
+    const startDate = new Date(visitaCircoscrizione.startDate);
+    const endDate = new Date(visitaCircoscrizione.endDate);
+    
+    checkDate.setHours(0, 0, 0, 0);
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(0, 0, 0, 0);
+    
+    return checkDate >= startDate && checkDate <= endDate;
+}
+
+// Renderizza il pannello di configurazione della visita
+function renderVisitaConfig() {
+    const container = document.getElementById('visita-config-container');
+    if (!container) return;
+    
+    const startDateValue = visitaCircoscrizione.startDate || '';
+    const endDateValue = visitaCircoscrizione.endDate || '';
+    
+    container.innerHTML = `
+        <div style="background: #fff3e0; border-radius: 10px; padding: 15px; border-left: 4px solid #ff9800; margin-bottom: 20px;">
+            <h4 style="margin: 0 0 10px 0; color: #e65100;">📅 Visita del Sorvegliante di Circoscrizione</h4>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="visita-enabled" ${visitaCircoscrizione.enabled ? 'checked' : ''} onchange="toggleVisitaEnabled(this.checked)">
+                    <span>🟠 Abilita periodo visita</span>
+                </label>
+                <div id="visita-dates-container" style="display: ${visitaCircoscrizione.enabled ? 'flex' : 'none'}; gap: 15px; flex-wrap: wrap; align-items: center;">
+                    <div>
+                        <label style="font-size: 12px; color: #666;">Data inizio:</label>
+                        <input type="date" id="visita-start-date" value="${startDateValue}" style="padding: 6px; border: 1px solid #ff9800; border-radius: 5px;">
+                    </div>
+                    <div>
+                        <label style="font-size: 12px; color: #666;">Data fine:</label>
+                        <input type="date" id="visita-end-date" value="${endDateValue}" style="padding: 6px; border: 1px solid #ff9800; border-radius: 5px;">
+                    </div>
+                    <button class="btn btn-sm" onclick="saveVisitaDates()" style="background: #ff9800;">💾 Salva Periodo</button>
+                </div>
+            </div>
+            <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                ⚠️ I giorni che cadono in questo periodo NON verranno inseriti nel programma del Servizio di Campo
+            </p>
+        </div>
+    `;
+    
+    if (visitaCircoscrizione.enabled) {
+        const startInput = document.getElementById('visita-start-date');
+        const endInput = document.getElementById('visita-end-date');
+        if (startInput) startInput.addEventListener('change', () => saveVisitaDates());
+        if (endInput) endInput.addEventListener('change', () => saveVisitaDates());
+    }
+}
+
+// Toggle abilitazione visita
+function toggleVisitaEnabled(enabled) {
+    visitaCircoscrizione.enabled = enabled;
+    saveVisitaCircoscrizione();
+    renderVisitaConfig();
+    renderFieldCalendar();
+}
+
+// Salva le date della visita
+function saveVisitaDates() {
+    const startInput = document.getElementById('visita-start-date');
+    const endInput = document.getElementById('visita-end-date');
+    
+    if (startInput) visitaCircoscrizione.startDate = startInput.value;
+    if (endInput) visitaCircoscrizione.endDate = endInput.value;
+    
+    saveVisitaCircoscrizione();
+    
+    if (visitaCircoscrizione.startDate && visitaCircoscrizione.endDate) {
+        if (new Date(visitaCircoscrizione.startDate) > new Date(visitaCircoscrizione.endDate)) {
+            alert('⚠️ La data di inizio non può essere successiva alla data di fine!');
+            visitaCircoscrizione.startDate = null;
+            visitaCircoscrizione.endDate = null;
+            saveVisitaCircoscrizione();
+            renderVisitaConfig();
+        }
+    }
+    
+    renderFieldCalendar();
+    alert('✅ Periodo visita salvato! I giorni in questo periodo non verranno programmati.');
+}
+
+// Mostra i giorni saltati nel calendario
+function renderSkippedDaysMessage(month, year) {
+    const calendar = document.getElementById('field-calendar');
+    if (!calendar) return;
+    
+    const skippedDays = [];
+    const lastDay = new Date(year, month + 1, 0);
+    
+    for (let d = 1; d <= lastDay.getDate(); d++) {
+        const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        if (isDateInVisitaPeriod(dateStr)) {
+            const date = new Date(year, month, d);
+            const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+            const dayName = dayNames[date.getDay()];
+            skippedDays.push(`${dayName} ${d}`);
+        }
+    }
+    
+    // Rimuovi eventuale messaggio esistente
+    const existingMsg = calendar.querySelector('.visita-warning-message');
+    if (existingMsg) existingMsg.remove();
+    
+    if (skippedDays.length > 0 && visitaCircoscrizione.enabled) {
+        const warningDiv = document.createElement('div');
+        warningDiv.className = 'visita-warning-message';
+        warningDiv.style.cssText = 'background: #fff3e0; border-left: 4px solid #ff9800; padding: 10px 15px; margin-bottom: 15px; border-radius: 8px;';
+        warningDiv.innerHTML = `
+            <strong style="color: #e65100;">📅 Periodo Visita Sorvegliante di Circoscrizione</strong><br>
+            <span style="font-size: 12px; color: #666;">I seguenti giorni NON sono stati programmati: ${skippedDays.join(', ')}</span>
+        `;
+        calendar.insertBefore(warningDiv, calendar.firstChild);
     }
 }
 // Funzione per aggiornare l'interfaccia quando cambia mese/anno nel Servizio di Campo
@@ -2494,10 +2652,12 @@ function loadConfiguration() {
         }
     }
     
-    // Carica lo stato di blocco INDIPENDENTEMENTE dal caricamento di appState
+// Carica lo stato di blocco INDIPENDENTEMENTE dal caricamento di appState
     loadLockState();
+    
+    // Carica i dati della visita del Sorvegliante
+    loadVisitaCircoscrizione();
 }
-
 function rigeneraStoricoDaAssegnazioni() {
     if (!appState.public.conductorHistory) {
         appState.public.conductorHistory = {};
@@ -3376,9 +3536,10 @@ function renderFieldCalendar() {
     // Carica i giorni speciali
     loadSpecialDays();
     
-    // Raccogli le assegnazioni esistenti
-    const assignmentsDelMese = [];
+    // Usiamo una Map per evitare duplicati (chiave = data_orario)
+    const uniqueAssignments = new Map();
     
+    // 1. Aggiungi le assegnazioni NORMALI
     Object.keys(appState.field.assignments).forEach(key => {
         const parts = key.split('_');
         const datePart = parts[0];
@@ -3386,36 +3547,45 @@ function renderFieldCalendar() {
         const [y, m, d] = datePart.split('-').map(Number);
         
         if (y === year && m === month + 1) {
-            assignmentsDelMese.push({
+            // Crea una chiave unica
+            const uniqueKey = `${datePart}_${timePart}`;
+            
+            uniqueAssignments.set(uniqueKey, {
                 key: key,
                 dateStr: datePart,
                 time: timePart,
                 day: d,
-                assignment: appState.field.assignments[key]
+                assignment: appState.field.assignments[key],
+                isSpecial: false,
+                specialData: null
             });
         }
     });
     
-    // AGGIUNGI I GIORNI SPECIALI come assegnazioni temporanee
-    const specialAssignments = [];
+    // 2. Aggiungi i GIORNI SPECIALI (sovrascrivono se stessa chiave, altrimenti si aggiungono)
     Object.keys(fieldSpecialDays).forEach(dateStr => {
         const [y, m, d] = dateStr.split('-').map(Number);
         if (y === year && m === month + 1) {
             const specialDay = fieldSpecialDays[dateStr];
-            specialAssignments.push({
+            const uniqueKey = `${dateStr}_${specialDay.time}`;
+            
+            // Controlla se esiste già un'assegnazione per questa data e orario
+            const existingAssignment = appState.field.assignments[uniqueKey];
+            
+            uniqueAssignments.set(uniqueKey, {
                 key: `special_${dateStr}`,
                 dateStr: dateStr,
                 time: specialDay.time,
                 day: d,
                 isSpecial: true,
                 specialData: specialDay,
-                assignment: appState.field.assignments[`${dateStr}_${specialDay.time}`] || { conductor: specialDay.conductor || '' }
+                assignment: existingAssignment || { conductor: specialDay.conductor || '' }
             });
         }
     });
     
-    // Unisci e ordina
-    const allAssignments = [...assignmentsDelMese, ...specialAssignments];
+    // Converti la Map in array e ordina
+    const allAssignments = Array.from(uniqueAssignments.values());
     allAssignments.sort((a, b) => {
         if (a.day !== b.day) return a.day - b.day;
         return a.time.localeCompare(b.time);
@@ -3603,11 +3773,11 @@ function renderFieldCalendar() {
         });
     });
     
-    // Aggiungi il pulsante "Aggiungi Giorno Speciale" se ci sono giorni nel mese senza configurazione
+    // Aggiungi il pulsante "Aggiungi Giorno Speciale"
     const lastDay = new Date(year, month + 1, 0).getDate();
     const existingDays = new Set(allAssignments.map(a => a.day));
     
-    if (existingDays.size < lastDay && isFieldModificationAllowed()) {
+    if (isFieldModificationAllowed()) {
         const addButtonContainer = document.createElement('div');
         addButtonContainer.style.marginTop = '20px';
         addButtonContainer.style.textAlign = 'center';
@@ -3622,10 +3792,11 @@ function renderFieldCalendar() {
         calendar.appendChild(addButtonContainer);
     }
     
+// Mostra i giorni saltati per la visita
+    renderSkippedDaysMessage(month, year);
+    
     console.log(`✅ Mostrate ${filteredAssignments.length} assegnazioni per ${monthNames[month]} ${year}`);
 }
-let fieldSpecialDays = {}; // Formato: { "2026-4-25": { time: "09:00", location: "Sala del Regno (Festa)", conductor: "" } }
-
 // Funzione per caricare i giorni speciali
 function loadSpecialDays() {
     const saved = localStorage.getItem('fieldSpecialDays');
@@ -4142,7 +4313,7 @@ function importaDati() {
     };
     reader.readAsText(file);
 }
-// Funzione per generare PDF del Servizio di Campo (da programmi adunanze 4.html)
+// Funzione per generare PDF del Servizio di Campo (con riquadro visita Sorvegliante)
 function generaPDFServizioCampo() {
     console.log("🚀 Avvio generazione PDF Servizio di Campo");
     
@@ -4162,11 +4333,9 @@ function generaPDFServizioCampo() {
         
         console.log(`Generazione PDF Servizio di Campo per ${mese} ${anno}`);
         
-        // Raccogli i dati dal pannello PDF
         const cittaInput = document.getElementById('pdf-citta');
         const citta = cittaInput ? cittaInput.value : 'SAN CATALDO CASALE';
         
-        // Verifica jsPDF
         if (typeof window.jspdf === 'undefined') {
             alert("Errore: Libreria jsPDF non caricata. Verifica la connessione internet.");
             return;
@@ -4197,13 +4366,13 @@ function generaPDFServizioCampo() {
             doc.roundedRect(x, y, w, h, 0, 0, 'FD');
         }
         
-        // Colori
         const coloreBlu = '#2B5291';
         const coloreBluScuro = '#2D5293';
         const coloreGiallo = '#FFBF00';
         const coloreGrigio = '#7D7D7D';
         const coloreRosso = '#C00000';
         const coloreGrigioChiaro = '#BEBEBE';
+        const coloreArancione = '#FF9800';
         
         const altezzaStriscia = 8;
         
@@ -4231,12 +4400,66 @@ function generaPDFServizioCampo() {
         doc.text(`${mese.toUpperCase()} ${anno}`, pageWidth / 2, y + (altezzaStriscia / 2) + 2, { align: 'center' });
         y += altezzaStriscia + 11.7;
         
-        // Raccogli tutte le assegnazioni del servizio di campo per il mese selezionato
-        const assignmentsByDate = [];
+  // ============================================================
+        // RIQUADRO VISITA SORVEGLIANTE DI CIRCOSCRIZIONE
+        // ============================================================
+        if (visitaCircoscrizione.enabled && visitaCircoscrizione.startDate && visitaCircoscrizione.endDate) {
+            // Formatta le date per la visualizzazione
+            const startDateObj = new Date(visitaCircoscrizione.startDate);
+            const endDateObj = new Date(visitaCircoscrizione.endDate);
+            
+            const formatDateForPDF = (date) => {
+                const giorno = date.getDate();
+                const mese = date.getMonth() + 1;
+                const anno = date.getFullYear();
+                return `${giorno.toString().padStart(2, '0')}/${mese.toString().padStart(2, '0')}/${anno}`;
+            };
+            
+            const startDateFormatted = formatDateForPDF(startDateObj);
+            const endDateFormatted = formatDateForPDF(endDateObj);
+            
+            // Altezza del riquadro visita (aumentata per contenere meglio il testo)
+            const altezzaRiquadroVisita = 12;
+            
+            // Sfondo arancione chiaro
+            doc.setFillColor(255, 243, 224); // #fff3e0
+            doc.setDrawColor(255, 152, 0);   // #ff9800
+            doc.setLineWidth(0.5);
+            doc.roundedRect(margin, y, contentWidth, altezzaRiquadroVisita, 2, 2, 'FD');
+            
+            // Testo del riquadro - SENZA emoji (usiamo testo normale)
+            doc.setTextColor(230, 81, 0); // #e65100
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'bold');
+            
+            // Testo diviso in due righe se necessario
+            const testoVisita = `VISITA DEL SORVEGLIANTE DI CIRCOSCRIZIONE`;
+            const periodoVisita = `DAL ${startDateFormatted} AL ${endDateFormatted}`;
+            
+            // Calcola la larghezza del testo per verificare se sta nella pagina
+            const larghezzaTesto = doc.getTextWidth(testoVisita);
+            
+            if (larghezzaTesto > contentWidth - 10) {
+                // Se il testo è troppo lungo, usa due righe
+                doc.text(testoVisita, pageWidth / 2, y + 5, { align: 'center' });
+                doc.text(periodoVisita, pageWidth / 2, y + 9, { align: 'center' });
+            } else {
+                // Testo su una sola riga
+                doc.text(`${testoVisita}: ${periodoVisita}`, pageWidth / 2, y + (altezzaRiquadroVisita / 2) + 2, { align: 'center' });
+            }
+            
+            y += altezzaRiquadroVisita + 6;
+        } else {
+            // Se non c'è la visita, aggiungi comunque uno spazio
+            y += 5;
+        }
         
+        // Raccogli tutte le assegnazioni
+        const assignmentsMap = new Map();
+        
+        // Assegnazioni normali
         if (appState && appState.field && appState.field.assignments) {
             Object.entries(appState.field.assignments).forEach(([dateKey, assignment]) => {
-                // Estrai solo la parte della data dalla chiave che potrebbe essere "YYYY-MM-DD_HH:MM"
                 let datePart, orarioAssegnazione;
                 
                 if (dateKey.includes('_')) {
@@ -4249,70 +4472,78 @@ function generaPDFServizioCampo() {
                 const [y, m, d] = datePart.split('-').map(Number);
                 
                 if (y === year && m === monthIndex + 1) {
-                    // Crea l'oggetto data correttamente
                     const dateObj = new Date(y, m - 1, d);
-                    
-                    // VERIFICA CHE LA DATA SIA VALIDA
-                    if (isNaN(dateObj.getTime())) {
-                        console.error(`Data non valida: ${datePart}`);
-                        return;
-                    }
+                    if (isNaN(dateObj.getTime())) return;
                     
                     const giornoSettimana = dateObj.getDay();
-                    
-                    // Nomi dei giorni in italiano - array completo
                     const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
                     const dayName = dayNames[giornoSettimana];
                     
-                    // Cerca la configurazione usando l'ID salvato nell'assegnazione
                     let dayConfig = null;
                     if (assignment.dayId) {
                         dayConfig = appState.field.days.find(day => day.id === assignment.dayId);
                     }
                     
-                    // Se non trova con l'ID, cerca per nome del giorno e orario
-                    if (!dayConfig) {
-                        // Cerca tra tutte le configurazioni attive
-                        const configsForDay = appState.field.days.filter(day => day.day === dayName && day.enabled === true);
-                        if (configsForDay.length === 1) {
-                            dayConfig = configsForDay[0];
-                        } else if (configsForDay.length > 1 && orarioAssegnazione) {
-                            // Se ci sono più configurazioni per lo stesso giorno, cerca quella con l'orario corrispondente
-                            dayConfig = configsForDay.find(day => day.time === orarioAssegnazione);
-                            if (!dayConfig && configsForDay.length > 0) {
-                                dayConfig = configsForDay[0];
-                            }
-                        } else if (configsForDay.length > 0) {
-                            dayConfig = configsForDay[0];
-                        }
-                    }
-                    
                     const orario = dayConfig ? dayConfig.time : (orarioAssegnazione || '09:00');
                     const luogo = dayConfig ? dayConfig.location : 'Sala del Regno';
                     
-                    // Formatta la data in modo sicuro - usa il mese già in italiano dalla variabile
                     const dataFormattata = `${dayName} ${d} ${mese} ${anno}`;
+                    const uniqueKey = `${datePart}_${orario}`;
                     
-                    assignmentsByDate.push({
-                        data: dataFormattata,
+                    if (!assignmentsMap.has(uniqueKey)) {
+                        assignmentsMap.set(uniqueKey, {
+                            data: dataFormattata,
+                            dataNum: d,
+                            giorno: dayName,
+                            orario: orario,
+                            luogo: luogo,
+                            conduttore: assignment.conductor || '',
+                            isSpecial: false,
+                            dateObj: dateObj
+                        });
+                    }
+                }
+            });
+        }
+        
+        // Giorni speciali (FESTIVI)
+        if (fieldSpecialDays) {
+            Object.keys(fieldSpecialDays).forEach(dateStr => {
+                const [y, m, d] = dateStr.split('-').map(Number);
+                if (y === year && m === monthIndex + 1) {
+                    const specialDay = fieldSpecialDays[dateStr];
+                    const dateObj = new Date(y, m - 1, d);
+                    if (isNaN(dateObj.getTime())) return;
+                    
+                    const giornoSettimana = dateObj.getDay();
+                    const dayNames = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+                    const dayName = dayNames[giornoSettimana];
+                    
+                    const orario = specialDay.time || '09:00';
+                    let luogo = "Festivo";
+                    
+                    const uniqueKey = `${dateStr}_${orario}`;
+                    const existingAssignment = appState.field.assignments[uniqueKey];
+                    const conduttore = existingAssignment ? existingAssignment.conductor : (specialDay.conductor || '');
+                    
+                    assignmentsMap.set(uniqueKey, {
+                        data: `${dayName} ${d} ${mese} ${anno}`,
                         dataNum: d,
                         giorno: dayName,
-                        giornoSettimana: giornoSettimana,
                         orario: orario,
                         luogo: luogo,
-                        conduttore: assignment.conductor || '',
-                        dayId: assignment.dayId,
+                        conduttore: conduttore,
+                        isSpecial: true,
                         dateObj: dateObj
                     });
                 }
             });
         }
         
-        // Ordina per data e poi per orario
+        // Converti e ordina
+        const assignmentsByDate = Array.from(assignmentsMap.values());
         assignmentsByDate.sort((a, b) => {
-            if (a.dataNum !== b.dataNum) {
-                return a.dataNum - b.dataNum;
-            }
+            if (a.dataNum !== b.dataNum) return a.dataNum - b.dataNum;
             return a.orario.localeCompare(b.orario);
         });
         
@@ -4340,7 +4571,7 @@ function generaPDFServizioCampo() {
             conduttore: margin + larghezzaData + larghezzaOra + larghezzaLuogo
         };
         
-        // Intestazione colonne
+        // Intestazione colonne ROSSA
         const offsetLarghezza = 0.1;
         doc.setFillColor(coloreRosso);
         doc.roundedRect(margin - offsetLarghezza, y, contentWidth + (offsetLarghezza * 2), 8, 0, 0, 'F');
@@ -4355,14 +4586,23 @@ function generaPDFServizioCampo() {
         doc.text('CONDUTTORE', colX.conduttore + (larghezzaConduttore / 2) - 10.6, y + 5, { align: 'center' });
         
         y += 8;
+        const yInizioRighe = y;
         
         // Disegna le righe dati
         doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(0, 0, 0);
         
         assignmentsByDate.forEach((assignment, index) => {
             const rigaY = y + (index * 8);
+            
+            if (assignment.isSpecial) {
+                doc.setTextColor(255, 140, 0);
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+            } else {
+                doc.setTextColor(0, 0, 0);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(10);
+            }
             
             doc.text(assignment.data, colX.data + 2, rigaY + 5);
             doc.text(assignment.orario, colX.ora + 2, rigaY + 5);
@@ -4370,11 +4610,14 @@ function generaPDFServizioCampo() {
             doc.text(assignment.conduttore, colX.conduttore + 2, rigaY + 5);
         });
         
-        // DOPO aver disegnato tutte le righe, disegna i riquadri rossi
-        // Salva la posizione Y dopo le righe
+        // Reset font e colore
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        
+        // Calcola i riquadri rossi per settimana
         const yDopoRighe = y + (assignmentsByDate.length * 8);
         
-        // Raggruppa le righe per SETTIMANA SOLARE (dal lunedì alla domenica)
         const settimane = [];
         let settimanaCorrente = [];
         let dataInizioSettimanaCorrente = null;
@@ -4383,31 +4626,26 @@ function generaPDFServizioCampo() {
             const dataAssegnazione = assignmentsByDate[i];
             const dataNum = dataAssegnazione.dataNum;
             
-            // Crea un oggetto data per questo giorno
             const dataObj = new Date(year, monthIndex, dataNum);
+            const giornoSettimana = dataObj.getDay();
             
-            // Calcola il lunedì di questa settimana
-            const giornoSettimana = dataObj.getDay(); // 0=domenica, 1=lunedì, ...
             let lunediOffset;
             if (giornoSettimana === 0) {
-                lunediOffset = 6; // domenica -> lunedì è 6 giorni prima
+                lunediOffset = 6;
             } else {
-                lunediOffset = giornoSettimana - 1; // lunedì=1 -> offset 0
+                lunediOffset = giornoSettimana - 1;
             }
             
             const lunediTimestamp = dataObj.getTime() - (lunediOffset * 24 * 60 * 60 * 1000);
             const lunediData = new Date(lunediTimestamp);
-            const chiaveSettimana = lunediData.toISOString().split('T')[0]; // YYYY-MM-DD del lunedì
+            const chiaveSettimana = lunediData.toISOString().split('T')[0];
             
             if (dataInizioSettimanaCorrente === null) {
-                // Prima riga, inizia una nuova settimana
                 dataInizioSettimanaCorrente = chiaveSettimana;
                 settimanaCorrente.push(i);
             } else if (chiaveSettimana === dataInizioSettimanaCorrente) {
-                // Stessa settimana, aggiungi alla settimana corrente
                 settimanaCorrente.push(i);
             } else {
-                // Settimana diversa, chiudi la settimana corrente e inizia una nuova
                 if (settimanaCorrente.length > 0) {
                     settimane.push([...settimanaCorrente]);
                 }
@@ -4416,30 +4654,18 @@ function generaPDFServizioCampo() {
             }
         }
         
-        // Aggiungi l'ultima settimana
         if (settimanaCorrente.length > 0) {
             settimane.push([...settimanaCorrente]);
         }
         
-        console.log("Settimane trovate (raggruppate per settimana solare):");
-        settimane.forEach((settimana, idx) => {
-            const giorni = settimana.map(i => {
-                const item = assignmentsByDate[i];
-                return `${item.giorno} ${item.dataNum} ore ${item.orario}`;
-            });
-            console.log(`  Settimana ${idx + 1}: ${giorni.join(', ')}`);
-        });
-        
-        // Disegna i riquadri rossi attorno a ogni settimana
+        // Disegna i riquadri rossi
         settimane.forEach(settimana => {
             const primoIndice = settimana[0];
             const ultimoIndice = settimana[settimana.length - 1];
             
-            // Calcola le coordinate Y corrette usando la posizione iniziale y
-            const yInizioRigaPrima = y + (primoIndice * 8);
-            const yFineRigaUltima = y + ((ultimoIndice + 1) * 8);
+            const yInizioRigaPrima = yInizioRighe + (primoIndice * 8);
+            const yFineRigaUltima = yInizioRighe + ((ultimoIndice + 1) * 8);
             
-            // Aggiungi un piccolo margine per il riquadro
             const yInizioRiquadro = yInizioRigaPrima - 2;
             const yFineRiquadro = yFineRigaUltima + 1;
             const altezzaGruppo = yFineRiquadro - yInizioRiquadro;
@@ -4449,10 +4675,9 @@ function generaPDFServizioCampo() {
             doc.rect(margin, yInizioRiquadro, contentWidth, altezzaGruppo);
         });
         
-        // Aggiorna y dopo le righe e i riquadri
         y = yDopoRighe + 15;
         
-        // STRISCIA BLU PER IL TITOLO ISTRUZIONI
+        // Istruzioni
         const altezzaStrisciaIstruzioni = 8;
         doc.setFillColor(coloreBluScuro);
         doc.roundedRect(margin, y, contentWidth, altezzaStrisciaIstruzioni, 0, 0, 'F');
@@ -4464,7 +4689,6 @@ function generaPDFServizioCampo() {
         
         y += altezzaStrisciaIstruzioni;
         
-        // RIQUADRO GRIGIO PER IL TESTO ISTRUZIONI
         const testoIstruzioni = `Se il fratello assegnato per condurre l'adunanza per il servizio di campo non può essere presente dovrà trovare chi lo sostituisce. (1 Corinti 14:40).`;
         
         doc.setFont('helvetica', 'normal');
@@ -4806,7 +5030,7 @@ function generaPDFOperaPubblica() {
 
         // Funzioni di assegnazione automatica (da programmi adunanze 4.html)
 function autoAssignField() {
-if (!isFieldModificationAllowed()) return;
+    if (!isFieldModificationAllowed()) return;
     console.log("🚀 Assegnazione automatica Servizio di Campo con distribuzione equilibrata");
     
     const month = parseInt(document.getElementById('field-month').value);
@@ -4816,8 +5040,9 @@ if (!isFieldModificationAllowed()) return;
     
     let assignments = { ...appState.field.assignments };
     let assignmentsCount = 0;
+    let skippedCount = 0;
     
-    // 🔥 Cancella le assegnazioni del mese corrente
+    // Cancella le assegnazioni del mese corrente
     Object.keys(assignments).forEach(key => {
         const parts = key.split('_');
         const datePart = parts[0];
@@ -4828,7 +5053,6 @@ if (!isFieldModificationAllowed()) return;
         }
     });
     
-    // Raccogli TUTTE le configurazioni attive
     const activeConfigs = [];
     for (let i = 0; i < appState.field.days.length; i++) {
         const day = appState.field.days[i];
@@ -4840,13 +5064,11 @@ if (!isFieldModificationAllowed()) return;
     console.log(`📋 Configurazioni attive: ${activeConfigs.length}`);
     activeConfigs.forEach(c => console.log(`   - ${c.day} ore ${c.time} (ID: ${c.id}) - Conduttori: ${c.conductors.length}`));
     
-    // Per OGNI configurazione separatamente
     for (let idx = 0; idx < activeConfigs.length; idx++) {
         const dayConfig = activeConfigs[idx];
         const targetDayName = dayConfig.day;
         const giorniPerQuestaConfig = [];
         
-        // Trova tutti i giorni del mese per quel giorno della settimana
         for (let d = 1; d <= lastDay.getDate(); d++) {
             const date = new Date(year, month, d);
             let dayName = '';
@@ -4863,6 +5085,13 @@ if (!isFieldModificationAllowed()) return;
             if (dayName === targetDayName) {
                 const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
                 
+                // CONTROLLA se la data rientra nel periodo della visita
+                if (isDateInVisitaPeriod(dateStr)) {
+                    console.log(`   ⏭️ Giorno ${d} ${monthNames[month]} saltato (periodo visita)`);
+                    skippedCount++;
+                    continue;
+                }
+                
                 giorniPerQuestaConfig.push({
                     dateStr: dateStr,
                     dayConfig: dayConfig,
@@ -4875,12 +5104,11 @@ if (!isFieldModificationAllowed()) return;
         }
         
         console.log(`\n📅 ${dayConfig.day} ore ${dayConfig.time} (ID: ${dayConfig.id})`);
-        console.log(`   Giorni trovati: ${giorniPerQuestaConfig.length}`);
+        console.log(`   Giorni trovati (esclusi visita): ${giorniPerQuestaConfig.length}`);
         
         const conductorsForDay = dayConfig.conductors || [];
         
         if (conductorsForDay.length > 0 && giorniPerQuestaConfig.length > 0) {
-            // 🔥 NUOVA LOGICA: Calcola il numero ideale di turni per ogni conduttore
             const numGiorni = giorniPerQuestaConfig.length;
             const numConduttori = conductorsForDay.length;
             const turniPerConduttore = Math.floor(numGiorni / numConduttori);
@@ -4889,8 +5117,6 @@ if (!isFieldModificationAllowed()) return;
             console.log(`   Conduttori: ${numConduttori}, Giorni: ${numGiorni}`);
             console.log(`   Turni base per conduttore: ${turniPerConduttore}, Resto: ${resto} conduttori faranno 1 turno extra`);
             
-            // Crea un array con i conduttori ripetuti in modo equilibrato
-            // Prima ordina per priorità (data più antica) per decidere chi riceve i turni extra
             const sortedConductors = [...conductorsForDay].sort((a, b) => {
                 const dateA = dayConfig.lastConducted[a] || 0;
                 const dateB = dayConfig.lastConducted[b] || 0;
@@ -4900,41 +5126,29 @@ if (!isFieldModificationAllowed()) return;
                 return dateA - dateB;
             });
             
-            // Crea una lista di conduttori ripetuti per il numero di turni da assegnare
             const distribuzioneTurni = [];
             
-            // Assegna i turni base a tutti
             for (let i = 0; i < numConduttori; i++) {
                 for (let j = 0; j < turniPerConduttore; j++) {
                     distribuzioneTurni.push(sortedConductors[i]);
                 }
             }
             
-            // Assegna i turni extra ai primi 'resto' conduttori (quelli con priorità più alta)
             for (let i = 0; i < resto; i++) {
                 distribuzioneTurni.push(sortedConductors[i]);
             }
             
-            console.log(`   Distribuzione turni:`, distribuzioneTurni);
-            
-            // Mescola l'ordine dei turni per evitare che gli stessi conduttori
-            // si alternino sempre nello stesso ordine (algoritmo Fisher-Yates)
             for (let i = distribuzioneTurni.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [distribuzioneTurni[i], distribuzioneTurni[j]] = [distribuzioneTurni[j], distribuzioneTurni[i]];
             }
             
-            console.log(`   Distribuzione mescolata:`, distribuzioneTurni);
-            
-            // Ordina i giorni cronologicamente
             giorniPerQuestaConfig.sort((a, b) => a.d - b.d);
             
-            // Assegna i conduttori ai giorni
             for (let g = 0; g < giorniPerQuestaConfig.length; g++) {
                 const giorno = giorniPerQuestaConfig[g];
                 const conductor = distribuzioneTurni[g % distribuzioneTurni.length];
                 
-                // 🔥 CHIAVE UNICA = DATA + ORARIO
                 const key = `${giorno.dateStr}_${dayConfig.time}`;
                 
                 assignments[key] = {
@@ -4955,14 +5169,17 @@ if (!isFieldModificationAllowed()) return;
     
     appState.field.assignments = assignments;
     
-    // Aggiorna tutte le date ultima conduzione
     aggiornaDateUltimaConduzioneField();
     
     renderFieldDays();
     renderFieldCalendar();
     saveConfiguration();
     
-    alert(`✅ Assegnazione automatica completata per ${monthNames[month]} ${year}!\n${assignmentsCount} assegnazioni create con distribuzione equilibrata.`);
+    let message = `✅ Assegnazione automatica completata per ${monthNames[month]} ${year}!\n${assignmentsCount} assegnazioni create.`;
+    if (skippedCount > 0) {
+        message += `\n⚠️ ${skippedCount} giorni saltati (periodo visita Sorvegliante).`;
+    }
+    alert(message);
 }
 
 function autoAssignPublic() {
@@ -5488,6 +5705,9 @@ async function initializeApp() {
     renderFieldDays();
     renderPublicDays();
     renderDisponibilita();
+    
+    // Renderizza configurazione visita
+    renderVisitaConfig();
     
     // 3. Controlla sessione e sincronizza dal cloud
     await checkSession();
