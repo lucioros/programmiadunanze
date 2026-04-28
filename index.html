@@ -4332,6 +4332,7 @@ function importaDati() {
     reader.readAsText(file);
 }
 // Funzione per generare PDF del Servizio di Campo (con riquadro visita Sorvegliante)
+// Funzione per generare PDF del Servizio di Campo (con riquadro visita Sorvegliante)
 function generaPDFServizioCampo() {
     console.log("🚀 Avvio generazione PDF Servizio di Campo");
     
@@ -4418,11 +4419,26 @@ function generaPDFServizioCampo() {
         doc.text(`${mese.toUpperCase()} ${anno}`, pageWidth / 2, y + (altezzaStriscia / 2) + 2, { align: 'center' });
         y += altezzaStriscia + 11.7;
         
-  // ============================================================
+        // ============================================================
         // RIQUADRO VISITA SORVEGLIANTE DI CIRCOSCRIZIONE
         // ============================================================
+        // Verifica se il mese del PDF rientra nel periodo della visita
+        let isVisitInCurrentMonth = false;
         if (visitaCircoscrizione.enabled && visitaCircoscrizione.startDate && visitaCircoscrizione.endDate) {
-            // Formatta le date per la visualizzazione
+            const startDateObj = new Date(visitaCircoscrizione.startDate);
+            const endDateObj = new Date(visitaCircoscrizione.endDate);
+            
+            // Crea date per l'inizio e la fine del mese del PDF
+            const monthStart = new Date(year, monthIndex, 1);
+            const monthEnd = new Date(year, monthIndex + 1, 0);
+            
+            // Verifica se il periodo di visita si sovrappone al mese corrente
+            if (startDateObj <= monthEnd && endDateObj >= monthStart) {
+                isVisitInCurrentMonth = true;
+            }
+        }
+
+        if (isVisitInCurrentMonth) {
             const startDateObj = new Date(visitaCircoscrizione.startDate);
             const endDateObj = new Date(visitaCircoscrizione.endDate);
             
@@ -4436,39 +4452,59 @@ function generaPDFServizioCampo() {
             const startDateFormatted = formatDateForPDF(startDateObj);
             const endDateFormatted = formatDateForPDF(endDateObj);
             
-            // Altezza del riquadro visita (aumentata per contenere meglio il testo)
+            // Altezza del riquadro visita
             const altezzaRiquadroVisita = 12;
             
             // Sfondo arancione chiaro
-            doc.setFillColor(255, 243, 224); // #fff3e0
-            doc.setDrawColor(255, 152, 0);   // #ff9800
+            doc.setFillColor(255, 243, 224);
+            doc.setDrawColor(255, 152, 0);
             doc.setLineWidth(0.5);
             doc.roundedRect(margin, y, contentWidth, altezzaRiquadroVisita, 2, 2, 'FD');
             
-            // Testo del riquadro - SENZA emoji (usiamo testo normale)
-            doc.setTextColor(230, 81, 0); // #e65100
+            // Testo del riquadro
+            doc.setTextColor(230, 81, 0);
             doc.setFontSize(10);
             doc.setFont('helvetica', 'bold');
             
-            // Testo diviso in due righe se necessario
-            const testoVisita = `VISITA DEL SORVEGLIANTE DI CIRCOSCRIZIONE`;
-            const periodoVisita = `DAL ${startDateFormatted} AL ${endDateFormatted}`;
+            // Calcola se il periodo di visita cade interamente nel mese o solo parzialmente
+            const startMonth = startDateObj.getMonth();
+            const endMonth = endDateObj.getMonth();
             
-            // Calcola la larghezza del testo per verificare se sta nella pagina
+            let periodoTesto = "";
+            if (startMonth === monthIndex && endMonth === monthIndex) {
+                // Visita interamente nel mese corrente
+                periodoTesto = `DAL ${startDateFormatted} AL ${endDateFormatted}`;
+            } else if (startMonth === monthIndex) {
+                // La visita inizia nel mese corrente ma finisce in un mese successivo
+                const lastDayOfMonth = new Date(year, monthIndex + 1, 0).getDate();
+                periodoTesto = `DAL ${startDateFormatted} AL ${lastDayOfMonth}/${startDateFormatted.split('/')[1]}/${year} (prosegue nel mese successivo)`;
+            } else if (endMonth === monthIndex) {
+                // La visita inizia in un mese precedente e finisce nel mese corrente
+                periodoTesto = `DAL 01/${startDateFormatted.split('/')[1]}/${year} AL ${endDateFormatted} (iniziata nel mese precedente)`;
+            } else {
+                // La visita copre l'intero mese (periodo più lungo del mese)
+                const firstDayOfMonth = new Date(year, monthIndex, 1);
+                const lastDayOfMonth = new Date(year, monthIndex + 1, 0);
+                const firstDayFormatted = formatDateForPDF(firstDayOfMonth);
+                const lastDayFormatted = formatDateForPDF(lastDayOfMonth);
+                periodoTesto = `DAL ${firstDayFormatted} AL ${lastDayFormatted} (periodo completo)`;
+            }
+            
+            const testoVisita = `📅 VISITA DEL SORVEGLIANTE DI CIRCOSCRIZIONE`;
+            
+            // Calcola la larghezza del testo
             const larghezzaTesto = doc.getTextWidth(testoVisita);
             
             if (larghezzaTesto > contentWidth - 10) {
-                // Se il testo è troppo lungo, usa due righe
                 doc.text(testoVisita, pageWidth / 2, y + 5, { align: 'center' });
-                doc.text(periodoVisita, pageWidth / 2, y + 9, { align: 'center' });
+                doc.text(periodoTesto, pageWidth / 2, y + 9, { align: 'center' });
             } else {
-                // Testo su una sola riga
-                doc.text(`${testoVisita}: ${periodoVisita}`, pageWidth / 2, y + (altezzaRiquadroVisita / 2) + 2, { align: 'center' });
+                doc.text(`${testoVisita}: ${periodoTesto}`, pageWidth / 2, y + (altezzaRiquadroVisita / 2) + 2, { align: 'center' });
             }
             
             y += altezzaRiquadroVisita + 6;
         } else {
-            // Se non c'è la visita, aggiungi comunque uno spazio
+            // Se non c'è la visita nel mese corrente, spazio minimo
             y += 5;
         }
         
