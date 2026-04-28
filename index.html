@@ -4332,7 +4332,6 @@ function importaDati() {
     reader.readAsText(file);
 }
 // Funzione per generare PDF del Servizio di Campo (con riquadro visita Sorvegliante)
-// Funzione per generare PDF del Servizio di Campo (con riquadro visita Sorvegliante)
 function generaPDFServizioCampo() {
     console.log("🚀 Avvio generazione PDF Servizio di Campo");
     
@@ -4391,7 +4390,6 @@ function generaPDFServizioCampo() {
         const coloreGrigio = '#7D7D7D';
         const coloreRosso = '#C00000';
         const coloreGrigioChiaro = '#BEBEBE';
-        const coloreArancione = '#FF9800';
         
         const altezzaStriscia = 8;
         
@@ -4422,17 +4420,13 @@ function generaPDFServizioCampo() {
         // ============================================================
         // RIQUADRO VISITA SORVEGLIANTE DI CIRCOSCRIZIONE
         // ============================================================
-        // Verifica se il mese del PDF rientra nel periodo della visita
         let isVisitInCurrentMonth = false;
         if (visitaCircoscrizione.enabled && visitaCircoscrizione.startDate && visitaCircoscrizione.endDate) {
             const startDateObj = new Date(visitaCircoscrizione.startDate);
             const endDateObj = new Date(visitaCircoscrizione.endDate);
-            
-            // Crea date per l'inizio e la fine del mese del PDF
             const monthStart = new Date(year, monthIndex, 1);
             const monthEnd = new Date(year, monthIndex + 1, 0);
             
-            // Verifica se il periodo di visita si sovrappone al mese corrente
             if (startDateObj <= monthEnd && endDateObj >= monthStart) {
                 isVisitInCurrentMonth = true;
             }
@@ -4452,8 +4446,8 @@ function generaPDFServizioCampo() {
             const startDateFormatted = formatDateForPDF(startDateObj);
             const endDateFormatted = formatDateForPDF(endDateObj);
             
-            // Altezza del riquadro visita
-            const altezzaRiquadroVisita = 12;
+            // Altezza del riquadro visita - AUMENTATA per contenere il testo
+            const altezzaRiquadroVisita = 18;
             
             // Sfondo arancione chiaro
             doc.setFillColor(255, 243, 224);
@@ -4461,50 +4455,21 @@ function generaPDFServizioCampo() {
             doc.setLineWidth(0.5);
             doc.roundedRect(margin, y, contentWidth, altezzaRiquadroVisita, 2, 2, 'FD');
             
-            // Testo del riquadro
+            // Testo del riquadro - divod in due righe
             doc.setTextColor(230, 81, 0);
             doc.setFontSize(10);
             doc.setFont('helvetica', 'bold');
             
-            // Calcola se il periodo di visita cade interamente nel mese o solo parzialmente
-            const startMonth = startDateObj.getMonth();
-            const endMonth = endDateObj.getMonth();
+            // Prima riga: titolo
+            doc.text("VISITA DEL SORVEGLIANTE DI CIRCOSCRIZIONE", pageWidth / 2, y + 6, { align: 'center' });
             
-            let periodoTesto = "";
-            if (startMonth === monthIndex && endMonth === monthIndex) {
-                // Visita interamente nel mese corrente
-                periodoTesto = `DAL ${startDateFormatted} AL ${endDateFormatted}`;
-            } else if (startMonth === monthIndex) {
-                // La visita inizia nel mese corrente ma finisce in un mese successivo
-                const lastDayOfMonth = new Date(year, monthIndex + 1, 0).getDate();
-                periodoTesto = `DAL ${startDateFormatted} AL ${lastDayOfMonth}/${startDateFormatted.split('/')[1]}/${year} (prosegue nel mese successivo)`;
-            } else if (endMonth === monthIndex) {
-                // La visita inizia in un mese precedente e finisce nel mese corrente
-                periodoTesto = `DAL 01/${startDateFormatted.split('/')[1]}/${year} AL ${endDateFormatted} (iniziata nel mese precedente)`;
-            } else {
-                // La visita copre l'intero mese (periodo più lungo del mese)
-                const firstDayOfMonth = new Date(year, monthIndex, 1);
-                const lastDayOfMonth = new Date(year, monthIndex + 1, 0);
-                const firstDayFormatted = formatDateForPDF(firstDayOfMonth);
-                const lastDayFormatted = formatDateForPDF(lastDayOfMonth);
-                periodoTesto = `DAL ${firstDayFormatted} AL ${lastDayFormatted} (periodo completo)`;
-            }
-            
-            const testoVisita = `📅 VISITA DEL SORVEGLIANTE DI CIRCOSCRIZIONE`;
-            
-            // Calcola la larghezza del testo
-            const larghezzaTesto = doc.getTextWidth(testoVisita);
-            
-            if (larghezzaTesto > contentWidth - 10) {
-                doc.text(testoVisita, pageWidth / 2, y + 5, { align: 'center' });
-                doc.text(periodoTesto, pageWidth / 2, y + 9, { align: 'center' });
-            } else {
-                doc.text(`${testoVisita}: ${periodoTesto}`, pageWidth / 2, y + (altezzaRiquadroVisita / 2) + 2, { align: 'center' });
-            }
+            // Seconda riga: periodo
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Periodo: dal ${startDateFormatted} al ${endDateFormatted}`, pageWidth / 2, y + 13, { align: 'center' });
             
             y += altezzaRiquadroVisita + 6;
         } else {
-            // Se non c'è la visita nel mese corrente, spazio minimo
             y += 5;
         }
         
