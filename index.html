@@ -3535,11 +3535,30 @@ function addPublicDay() {
             renderPublicDays();
         }
 
-        function updatePublicDay(index, field, value) {
-	  if (!isPublicModificationAllowed()) return;
-            appState.public.days[index][field] = value;
-        }
-
+function updatePublicDay(index, field, value) {
+    if (!isPublicModificationAllowed()) return;
+    appState.public.days[index][field] = value;
+    saveConfiguration();
+}
+// Funzione per aggiornare startTime o endTime di un giorno dell'Opera Pubblica
+function updatePublicDayTime(index, type, value) {
+    if (!isPublicModificationAllowed()) return;
+    
+    if (type === 'start') {
+        appState.public.days[index].startTime = value;
+    } else if (type === 'end') {
+        appState.public.days[index].endTime = value;
+    }
+    
+    saveConfiguration();
+    renderPublicDays();  // Aggiorna la configurazione
+    
+    // Se la tab Opera Pubblica è attiva, aggiorna il calendario
+    const publicTab = document.getElementById('public-tab');
+    if (publicTab && publicTab.classList.contains('active')) {
+        renderPublicCalendar();
+    }
+}
         // FUNZIONI CALENDARIO (da programmi adunanze 4.html)
 
 function renderFieldCalendar() {
