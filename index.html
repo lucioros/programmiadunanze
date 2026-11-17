@@ -912,42 +912,65 @@ function nuovoPdf(){
   if (!window.jspdf){ alert('La libreria per creare i PDF non è stata caricata. Controlla la connessione a internet e ricarica la pagina.'); return null; }
   return new window.jspdf.jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
 }
-function intestazionePdf(doc, titolo, anno, m){
+/* ---------------------------------------------------------------------
+   UNA SOLA PAGINA
+   Il PDF viene disegnato con un "layout" L = {k, g}:
+   - g riduce gli spazi vuoti tra le fasce dell'intestazione;
+   - k riduce in proporzione altezze delle righe e dimensioni del testo.
+   Si prova prima a stringere solo gli spazi, poi a rimpicciolire il contenuto,
+   finché tutto entra nel foglio A4. Colori e struttura restano identici.
+   --------------------------------------------------------------------- */
+function adattaAPagina(disegna){
+  const disponibile = PDF_H - PDF_M;
+  const prove = [];
+  for (const g of [1, 0.8, 0.6, 0.4, 0.25]) prove.push({k:1, g});
+  for (let k = 0.98; k >= 0.4; k = Math.round((k - 0.02)*100)/100) prove.push({k, g:0.25});
+  for (const L of prove){
+    const prova = new window.jspdf.jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+    if (disegna(prova, L) <= disponibile) return L;
+  }
+  return prove[prove.length - 1];
+}
+function intestazionePdf(doc, titolo, anno, m, L){
+  const kb = Math.max(L.k, 0.75), hb = 8 * kb;
+  const gap = [16.7, 11.2, 11.7].map(v => v * L.g);
   let y = PDF_M;
   const fascia = (testo, fill, col) => {
     doc.setFillColor(fill); doc.setDrawColor('#000000'); doc.setLineWidth(0.2);
-    doc.rect(PDF_M, y, PDF_CW, 8, 'FD');
+    doc.rect(PDF_M, y, PDF_CW, hb, 'FD');
     doc.setTextColor(col); doc.setFont('helvetica','bold');
-    let fs = 18; doc.setFontSize(fs);
+    let fs = 18 * kb; doc.setFontSize(fs);
     while (doc.getTextWidth(testo) > PDF_CW - 4 && fs > 10){ fs -= 1; doc.setFontSize(fs); }
-    doc.text(testo, PDF_W/2, y + 6, {align:'center'});
+    doc.text(testo, PDF_W/2, y + hb*0.75, {align:'center'});
   };
-  fascia(titolo, '#2B5291', '#FFFFFF'); y += 8 + 16.7;
-  fascia(S.impostazioni.citta || '', '#FFBF00', '#000000'); y += 8 + 11.2;
-  fascia(`${MESI[m].toUpperCase()} ${anno}`, '#7D7D7D', '#FFFFFF'); y += 8 + 11.7;
+  fascia(titolo, '#2B5291', '#FFFFFF'); y += hb + gap[0];
+  fascia(S.impostazioni.citta || '', '#FFBF00', '#000000'); y += hb + gap[1];
+  fascia(`${MESI[m].toUpperCase()} ${anno}`, '#7D7D7D', '#FFFFFF'); y += hb + gap[2];
   return y;
 }
-function boxVisitaPdf(doc, y){
+function boxVisitaPdf(doc, y, L){
+  const kv = Math.max(L.k, 0.7), h = 18 * kv;
   doc.setFillColor(255,243,224); doc.setDrawColor(255,152,0); doc.setLineWidth(0.5);
-  doc.roundedRect(PDF_M, y, PDF_CW, 18, 2, 2, 'FD');
-  doc.setTextColor(230,81,0); doc.setFontSize(10); doc.setFont('helvetica','bold');
-  doc.text('VISITA DEL SORVEGLIANTE DI CIRCOSCRIZIONE', PDF_W/2, y + 7, {align:'center'});
-  doc.setFontSize(9); doc.setFont('helvetica','normal');
-  doc.text(`Periodo: dal ${fmtData(S.visita.inizio)} al ${fmtData(S.visita.fine)}`, PDF_W/2, y + 13, {align:'center'});
-  return y + 18 + 6;
+  doc.roundedRect(PDF_M, y, PDF_CW, h, 2, 2, 'FD');
+  doc.setTextColor(230,81,0); doc.setFontSize(10 * kv); doc.setFont('helvetica','bold');
+  doc.text('VISITA DEL SORVEGLIANTE DI CIRCOSCRIZIONE', PDF_W/2, y + 7*kv, {align:'center'});
+  doc.setFontSize(9 * kv); doc.setFont('helvetica','normal');
+  doc.text(`Periodo: dal ${fmtData(S.visita.inizio)} al ${fmtData(S.visita.fine)}`, PDF_W/2, y + 13*kv, {align:'center'});
+  return y + h + 6 * Math.max(L.g, L.k * 0.5);
 }
 // Scrive testo in una cella, andando a capo e riducendo il carattere se serve
-function testoInCella(doc, testo, x, y, w, h, {size=10, bold=false, colore='#000000', maxRighe=2, padding=2} = {}){
+function testoInCella(doc, testo, x, y, w, h, {size=10, bold=false, colore='#000000', maxRighe=2, padding=2, minimo=5} = {}){
   doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setTextColor(colore);
   let s = size, righe;
   for (;;){
     doc.setFontSize(s);
     righe = doc.splitTextToSize(String(testo ?? ''), w - 2*padding);
-    if (righe.length <= maxRighe || s <= 6.5) break;
-    s -= 0.5;
+    const lh = s * 0.3528 * 1.15;
+    if ((righe.length <= maxRighe && righe.length * lh <= h + 0.5) || s <= minimo) break;
+    s -= 0.25;
   }
   righe = righe.slice(0, maxRighe);
-  const lh = s * 0.3528 * 1.2;
+  const lh = s * 0.3528 * 1.15;
   const y0 = y + (h - righe.length*lh)/2 + lh*0.78;
   righe.forEach((r,i) => doc.text(r, x + padding, y0 + i*lh));
 }
@@ -961,68 +984,132 @@ function raggruppaSettimane(slots){
   return out;
 }
 
-function pdfCampo(){
-  const {y:anno, m} = vista.campo;
-  const slots = slotDelMese('campo', anno, m).filter(s => !s.annullato && !s.inVisita);
-  const senza = slots.filter(s => !S.campo.assegnazioni[s.key]?.p).length;
-  if (senza && !confirm(`${senza} adunanze di ${MESI[m]} non hanno ancora un conduttore.\nGenerare comunque il PDF? (le caselle resteranno vuote)`)) return;
-  const doc = nuovoPdf(); if (!doc) return;
-  let y = intestazionePdf(doc, 'ADUNANZE PER IL SERVIZIO DI CAMPO', anno, m);
-  y = visitaNelMese('campo', anno, m) ? boxVisitaPdf(doc, y) : y + 5;
-  const nomeFile = `Adunanze_Servizio_Campo_${MESI[m]}_${anno}.pdf`;
+/* ---------- Servizio di campo ---------- */
+function disegnaPdfCampo(doc, L, anno, m, slots){
+  const k = L.k;
+  let y = intestazionePdf(doc, 'ADUNANZE PER IL SERVIZIO DI CAMPO', anno, m, L);
+  y = visitaNelMese('campo', anno, m) ? boxVisitaPdf(doc, y, L) : y + 5 * L.g;
   if (!slots.length){
     doc.setFontSize(14); doc.setTextColor('#646464'); doc.setFont('helvetica','normal');
     doc.text('Nessuna adunanza programmata per questo mese', PDF_W/2, y + 20, {align:'center'});
-    doc.save(nomeFile); return;
+    return y + 20;
   }
   const w = {data:50, ora:25, luogo:55, cond:50};
   const x = {data:PDF_M}; x.ora = x.data + w.data; x.luogo = x.ora + w.ora; x.cond = x.luogo + w.luogo;
-  const intest = () => {
-    doc.setFillColor('#C00000'); doc.rect(PDF_M, y, PDF_CW, 8, 'F');
-    doc.setTextColor('#FFFFFF'); doc.setFontSize(10); doc.setFont('helvetica','bold');
-    doc.text('DATA', x.data + 2, y + 5.5); doc.text('ORA', x.ora + 2, y + 5.5);
-    doc.text('LUOGO', x.luogo + 2, y + 5.5); doc.text('CONDUTTORE', x.cond + 2, y + 5.5);
-    y += 8 + 2;
-  };
-  intest();
-  const RH = 8;
+  const hInt = 8 * Math.max(k, 0.7);
+  doc.setFillColor('#C00000'); doc.rect(PDF_M, y, PDF_CW, hInt, 'F');
+  doc.setTextColor('#FFFFFF'); doc.setFontSize(10 * Math.max(k, 0.7)); doc.setFont('helvetica','bold');
+  [['DATA','data'],['ORA','ora'],['LUOGO','luogo'],['CONDUTTORE','cond']].forEach(([t,c]) => doc.text(t, x[c] + 2, y + hInt*0.69));
+  y += hInt + 2 * k;
+  const RH = 8 * k;
   for (const sett of raggruppaSettimane(slots)){
-    const h = sett.length * RH + 2;
-    if (y + h > PDF_H - PDF_M){ doc.addPage(); y = PDF_M; intest(); }
+    const h = sett.length * RH + 2 * k;
     const y0 = y;
     sett.forEach((s,i) => {
-      const ry = y0 + 1 + i*RH;
+      const ry = y0 + k + i*RH;
       const a = S.campo.assegnazioni[s.key];
       if (s.speciale){ doc.setFillColor(255,235,215); doc.rect(PDF_M + 0.3, ry, PDF_CW - 0.6, RH, 'F'); }
-      const st = {size:10, bold:s.speciale, colore:s.speciale ? '#DC3545' : '#000000', maxRighe:2};
+      const st = {size:10 * k, bold:s.speciale, colore:s.speciale ? '#DC3545' : '#000000', maxRighe:2, padding:2};
       const luogo = s.speciale && !/festiv/i.test(s.luogo) ? `${s.luogo} (Festivo)` : s.luogo;
       testoInCella(doc, `${GIORNI[giornoSett(s.data)]} ${Number(s.data.slice(8))} ${MESI[m]} ${anno}`, x.data, ry, w.data, RH, st);
       testoInCella(doc, s.ora, x.ora, ry, w.ora, RH, {...st, maxRighe:1});
       testoInCella(doc, luogo, x.luogo, ry, w.luogo, RH, st);
       testoInCella(doc, a?.p ? nomeDi(a.p) : '', x.cond, ry, w.cond, RH, st);
     });
-    doc.setDrawColor('#C00000'); doc.setLineWidth(0.5); doc.rect(PDF_M, y0 - 1, PDF_CW, h);
-    y = y0 + h + 1;
+    doc.setDrawColor('#C00000'); doc.setLineWidth(0.5); doc.rect(PDF_M, y0 - k, PDF_CW, h);
+    y = y0 + h + k;
   }
   const testo = (S.impostazioni.istruzioniCampo || '').trim();
   if (testo){
-    y += 12;
-    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    const kt = Math.max(k, 0.7);
+    y += 12 * L.g;
+    const hTit = 8 * kt;
+    doc.setFillColor('#2D5293'); doc.rect(PDF_M, y, PDF_CW, hTit, 'F');
+    doc.setTextColor('#FFFFFF'); doc.setFontSize(12 * kt); doc.setFont('helvetica','bold');
+    doc.text('PRESTA ATTENZIONE ALLE SEGUENTI INFORMAZIONI / ISTRUZIONI', PDF_W/2, y + hTit*0.72, {align:'center'});
+    y += hTit;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9 * kt);
     const righe = doc.splitTextToSize(testo, PDF_CW - 4);
-    const hT = righe.length * 4 + 6;
-    if (y + 8 + hT > PDF_H - PDF_M){ doc.addPage(); y = PDF_M; }
-    doc.setFillColor('#2D5293'); doc.rect(PDF_M, y, PDF_CW, 8, 'F');
-    doc.setTextColor('#FFFFFF'); doc.setFontSize(12); doc.setFont('helvetica','bold');
-    doc.text('PRESTA ATTENZIONE ALLE SEGUENTI INFORMAZIONI / ISTRUZIONI', PDF_W/2, y + 5.8, {align:'center'});
-    y += 8;
+    const hT = righe.length * 4 * kt + 6 * kt;
     doc.setFillColor('#BEBEBE'); doc.rect(PDF_M, y, PDF_CW, hT, 'F');
-    doc.setTextColor('#000000'); doc.setFont('helvetica','normal'); doc.setFontSize(9);
-    doc.text(righe, PDF_M + 2, y + 5);
+    doc.setTextColor('#000000');
+    doc.text(righe, PDF_M + 2, y + 5 * kt, {lineHeightFactor:1.25});
+    y += hT;
   }
-  doc.save(nomeFile);
+  return y;
+}
+function pdfCampo(){
+  const {y:anno, m} = vista.campo;
+  const slots = slotDelMese('campo', anno, m).filter(s => !s.annullato && !s.inVisita);
+  const senza = slots.filter(s => !S.campo.assegnazioni[s.key]?.p).length;
+  if (senza && !confirm(`${senza} adunanze di ${MESI[m]} non hanno ancora un conduttore.\nGenerare comunque il PDF? (le caselle resteranno vuote)`)) return;
+  const doc = nuovoPdf(); if (!doc) return;
+  const L = adattaAPagina((d, l) => disegnaPdfCampo(d, l, anno, m, slots));
+  disegnaPdfCampo(doc, L, anno, m, slots);
+  doc.save(`Adunanze_Servizio_Campo_${MESI[m]}_${anno}.pdf`);
   avviso(`📥 PDF di ${MESI[m]} ${anno} generato`, 'ok');
 }
 
+/* ---------- Opera pubblica ---------- */
+function disegnaPdfPubblica(doc, L, anno, m, slots){
+  const k = L.k;
+  let y = intestazionePdf(doc, 'TESTIMONIANZA PUBBLICA CON ESPOSITORI', anno, m, L);
+  if (visitaNelMese('pubblica', anno, m)) y = boxVisitaPdf(doc, y, L);
+  if (!slots.length){
+    doc.setFontSize(14); doc.setTextColor('#646464'); doc.setFont('helvetica','normal');
+    doc.text('Nessuna assegnazione per questo mese', PDF_W/2, y + 20, {align:'center'});
+    return y + 20;
+  }
+  const w = {sett:41.7, data:31.6, ora:23, luogo:33.5, procl:50.2};
+  const x = {sett:PDF_M}; x.data = x.sett + w.sett; x.ora = x.data + w.data; x.luogo = x.ora + w.ora; x.procl = x.luogo + w.luogo;
+  const cella = (xx, yy, ww, hh, fill) => { doc.setFillColor(fill); doc.setDrawColor('#000000'); doc.setLineWidth(0.1); doc.rect(xx, yy, ww, hh, 'FD'); };
+  const hInt = 7 * Math.max(k, 0.7);
+  cella(PDF_M, y, PDF_CW, hInt, '#FF0000');
+  doc.setTextColor('#FFFFFF'); doc.setFontSize(10 * Math.max(k, 0.7)); doc.setFont('helvetica','bold');
+  [['SETTIMANA','sett'],['DATA','data'],['ORA','ora'],['LUOGO SCELTO','luogo'],['PROCLAMATORI','procl']]
+    .forEach(([tx,c]) => doc.text(tx, x[c] + w[c]/2, y + hInt*0.69, {align:'center'}));
+  y += hInt;
+  raggruppaSettimane(slots).forEach((sett, i) => {
+    const righe = sett.map(s => { const nomi = S.pubblica.assegnazioni[s.key].p.filter(Boolean).map(nomeDi); return {s, nomi, h:(nomi.length >= 3 ? 16 : 12) * k}; });
+    const hTot = righe.reduce((t,r) => t + r.h, 0);
+    cella(x.sett, y, w.sett, hTot, '#FFBF00');
+    testoInCella(doc, `Settimana ${i+1}`, x.sett, y, w.sett, hTot, {size:12 * Math.max(k, 0.7), bold:true, maxRighe:1});
+    let yy = y;
+    for (const r of righe){
+      const s = r.s;
+      ['data','ora','luogo','procl'].forEach(c => cella(x[c], yy, w[c], r.h, '#FFFFFF'));
+      testoInCella(doc, `${GIORNI[giornoSett(s.data)].toLowerCase()} ${Number(s.data.slice(8))} ${MESI[m].toLowerCase()}`, x.data, yy, w.data, r.h, {size:9 * k, maxRighe:2});
+      testoInCella(doc, `${s.ora} - ${s.fine}`, x.ora, yy, w.ora, r.h, {size:9 * k, maxRighe:1});
+      testoInCella(doc, s.luogo, x.luogo, yy, w.luogo, r.h, {size:9 * k, maxRighe:3});
+      // Proclamatori: uno per riga, centrati verticalmente nella cella
+      const passo = 4 * k;
+      doc.setFont('helvetica','normal'); doc.setTextColor('#000000');
+      const y0 = yy + (r.h - r.nomi.length * passo) / 2 + passo * 0.78;
+      r.nomi.forEach((n,j) => {
+        let fs = 9 * k; doc.setFontSize(fs);
+        while (doc.getTextWidth(n) > w.procl - 4 && fs > 5){ fs -= 0.25; doc.setFontSize(fs); }
+        doc.text(n, x.procl + 2, y0 + j*passo);
+      });
+      yy += r.h;
+    }
+    y = yy + 2 * k;
+  });
+  const linee = (S.impostazioni.istruzioniPubblica || '').split('\n').map(l => l.trim()).filter(Boolean);
+  if (linee.length){
+    const kt = Math.max(k, 0.7);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9 * kt);
+    const righe = []; linee.forEach(l => righe.push(...doc.splitTextToSize('• ' + l, PDF_CW - 8)));
+    const hBox = 10 * kt + righe.length * 4.5 * kt + 3 * kt;
+    const yb = Math.max(y + 10 * L.g, PDF_H - PDF_M - hBox);   // in fondo alla pagina, se c'è spazio
+    cella(PDF_M, yb, PDF_CW, hBox, '#F5F5F5');
+    doc.setFont('helvetica','bold'); doc.setFontSize(10 * kt); doc.setTextColor('#000000');
+    doc.text('PRESTA ATTENZIONE ALLE SEGUENTI INFORMAZIONI / ISTRUZIONI', PDF_M + 2, yb + 6 * kt);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9 * kt);
+    righe.forEach((r,j) => doc.text(r, PDF_M + 4, yb + 12 * kt + j * 4.5 * kt));
+    y = yb + hBox;
+  }
+  return y;
+}
 function pdfPubblica(){
   const {y:anno, m} = vista.pubblica;
   const tutti = slotDelMese('pubblica', anno, m).filter(s => !s.annullato && !s.inVisita);
@@ -1034,62 +1121,9 @@ function pdfPubblica(){
   if (mezzi) note.push(`• ${mezzi} giorni hanno un solo conduttore`);
   if (note.length && !confirm(`Attenzione:\n${note.join('\n')}\n\nGenerare comunque il PDF?`)) return;
   const doc = nuovoPdf(); if (!doc) return;
-  let y = intestazionePdf(doc, 'TESTIMONIANZA PUBBLICA CON ESPOSITORI', anno, m);
-  if (visitaNelMese('pubblica', anno, m)) y = boxVisitaPdf(doc, y);
-  const nomeFile = `Programma_Opera_Pubblica_${MESI[m]}_${anno}.pdf`;
-  if (!slots.length){
-    doc.setFontSize(14); doc.setTextColor('#646464'); doc.setFont('helvetica','normal');
-    doc.text('Nessuna assegnazione per questo mese', PDF_W/2, y + 20, {align:'center'});
-    doc.save(nomeFile); return;
-  }
-  const w = {sett:41.7, data:31.6, ora:23, luogo:33.5, procl:50.2};
-  const x = {sett:PDF_M}; x.data = x.sett + w.sett; x.ora = x.data + w.data; x.luogo = x.ora + w.ora; x.procl = x.luogo + w.luogo;
-  const cella = (xx, yy, ww, hh, fill) => { doc.setFillColor(fill); doc.setDrawColor('#000000'); doc.setLineWidth(0.1); doc.rect(xx, yy, ww, hh, 'FD'); };
-  const intest = () => {
-    cella(PDF_M, y, PDF_CW, 7, '#FF0000');
-    doc.setTextColor('#FFFFFF'); doc.setFontSize(10); doc.setFont('helvetica','bold');
-    [['SETTIMANA','sett'],['DATA','data'],['ORA','ora'],['LUOGO SCELTO','luogo'],['PROCLAMATORI','procl']]
-      .forEach(([tx,k]) => doc.text(tx, x[k] + w[k]/2, y + 4.8, {align:'center'}));
-    y += 7;
-  };
-  intest();
-  raggruppaSettimane(slots).forEach((sett, i) => {
-    const righe = sett.map(s => { const nomi = S.pubblica.assegnazioni[s.key].p.filter(Boolean).map(nomeDi); return {s, nomi, h: nomi.length >= 3 ? 16 : 12}; });
-    const hTot = righe.reduce((t,r) => t + r.h, 0);
-    if (y + hTot > PDF_H - PDF_M){ doc.addPage(); y = PDF_M; intest(); }
-    cella(x.sett, y, w.sett, hTot, '#FFBF00');
-    testoInCella(doc, `Settimana ${i+1}`, x.sett, y, w.sett, hTot, {size:12, bold:true, maxRighe:1});
-    let yy = y;
-    for (const r of righe){
-      const s = r.s;
-      ['data','ora','luogo','procl'].forEach(k => cella(x[k], yy, w[k], r.h, '#FFFFFF'));
-      testoInCella(doc, `${GIORNI[giornoSett(s.data)].toLowerCase()} ${Number(s.data.slice(8))} ${MESI[m].toLowerCase()}`, x.data, yy, w.data, r.h, {size:9, maxRighe:2});
-      testoInCella(doc, `${s.ora} - ${s.fine}`, x.ora, yy, w.ora, r.h, {size:9, maxRighe:1});
-      testoInCella(doc, s.luogo, x.luogo, yy, w.luogo, r.h, {size:9, maxRighe:3});
-      doc.setFont('helvetica','normal'); doc.setTextColor('#000000');
-      r.nomi.forEach((n,j) => {
-        let fs = 9; doc.setFontSize(fs);
-        while (doc.getTextWidth(n) > w.procl - 4 && fs > 6.5){ fs -= 0.5; doc.setFontSize(fs); }
-        doc.text(n, x.procl + 2, yy + 5 + j*4);
-      });
-      yy += r.h;
-    }
-    y = yy + 2;
-  });
-  const linee = (S.impostazioni.istruzioniPubblica || '').split('\n').map(l => l.trim()).filter(Boolean);
-  if (linee.length){
-    doc.setFont('helvetica','normal'); doc.setFontSize(9);
-    const righe = []; linee.forEach(l => righe.push(...doc.splitTextToSize('• ' + l, PDF_CW - 8)));
-    const hBox = 10 + righe.length*4.5 + 3;
-    let yb = Math.max(y + 10, PDF_H - PDF_M - hBox);
-    if (yb + hBox > PDF_H - PDF_M){ doc.addPage(); yb = PDF_M; }
-    cella(PDF_M, yb, PDF_CW, hBox, '#F5F5F5');
-    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor('#000000');
-    doc.text('PRESTA ATTENZIONE ALLE SEGUENTI INFORMAZIONI / ISTRUZIONI', PDF_M + 2, yb + 6);
-    doc.setFont('helvetica','normal'); doc.setFontSize(9);
-    righe.forEach((r,j) => doc.text(r, PDF_M + 4, yb + 12 + j*4.5));
-  }
-  doc.save(nomeFile);
+  const L = adattaAPagina((d, l) => disegnaPdfPubblica(d, l, anno, m, slots));
+  disegnaPdfPubblica(doc, L, anno, m, slots);
+  doc.save(`Programma_Opera_Pubblica_${MESI[m]}_${anno}.pdf`);
   avviso(`📥 PDF di ${MESI[m]} ${anno} generato`, 'ok');
 }
 
